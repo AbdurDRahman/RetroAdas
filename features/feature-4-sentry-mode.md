@@ -13,14 +13,14 @@ significant.
 ## Scope
 - Always-on low-power motion sensing while parked
 - Wake-on-motion for the main compute (Jetson)
-- Buffered local footage recording around the trigger event
+- Buffered local footage recording after the sensor trigger event
 - Alert to owner's phone (via server) if event is confirmed
 
 ## Functional Requirements
-1. While parked, run cameras at reduced fps/resolution and keep a motion sensor (radar) always-on at very low power.
+1. keep a motion sensor (radar) always-on at very low power.
 2. Keep Jetson in deep sleep (SC7) between events to conserve power.
 3. On motion detection by the radar, wake the Jetson from sleep.
-4. Jetson boots, begins recording, and buffers the last few minutes of footage locally (rolling buffer, not just post-trigger).
+4. Jetson boots, begins recording and storing .
 5. If the event is confirmed significant (e.g. contact/impact detected, not just a passing pedestrian), send an alert to the owner's phone via the server.
 6. Jetson returns to deep sleep after the event window ends with no further motion.
 
@@ -30,7 +30,7 @@ significant.
 - **Total standby draw:** ~0.4 W
 - **Power source:** Car battery (primary) with a 20,000 mAh power bank as failover when the car is off/disconnected
 - **Wake latency:** Jetson boot time 4–7 s; at typical "someone approaching a parked car" speeds (~5 kph), an object detected at 10 m only covers ~1.4 m during boot — still within a safe detection window
-- **Data flow:** Cameras (reduced fps/res) → Jetson (on wake) → local buffered footage (last few minutes) → server (if confirmed) → owner's phone alert
+- **Data flow:** radar sensor  → Jetson (on wake) → recording and storing → server (if confirmed) → owner's phone alert
 
 ## Power / Duration Budget (already calculated in appendix — reference)
 | Mode | Draw | Source | Duration |
@@ -43,17 +43,19 @@ This is why Sentry Mode *requires* the sleep-state design — running the
 active-mode power draw while parked would drain the car battery in about a day.
 
 ## KPIs (to formalize)
+
 - Standby duration on car battery: target ~28 days (per calculation)
 - Standby duration on power bank failover: target ~6.5 days
 - Wake latency: ≤ 7 s (boot time)
 - False trigger rate (non-threat motion, e.g. leaves, other pedestrians walking by, causing unnecessary wake/recording)
 
 ## Dependencies / Components
-- Microwave radar/motion sensor — **not yet in resource availability table, needs sourcing**
+
+- Microwave radar/motion sensor — 
 - Jetson Orin Nano SC7 deep sleep support (verify carrier board wake-on-GPIO/interrupt capability)
 - 20,000 mAh power bank
 - Local storage for buffered footage (SD card / eMMC — capacity needs sizing based on buffer length × resolution)
-- Server-side push notification path (shared with Feature 2's infrastructure)
+- turnover switch for switching between sentry-mode and driver-mode. 
 
 ## Open Questions
 - What exactly counts as a "confirmed" event worth alerting the owner vs. just logging locally? (Simple motion vs. contact/proximity/dwell-time based?)

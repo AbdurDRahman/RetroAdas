@@ -14,7 +14,6 @@ hazards from users.
   interface): accidents, road closures, potholes, etc.
 - Server-side storage, deduplication, and expiry of hazard reports
 - Distribution of relevant hazards to nearby vehicles and mobile app users
-- Basic gamification: user contribution score
 
 ## Functional Requirements
 1. Edge device posts auto-detected hazards to the server in real time (`POST /v1/hazards`).
@@ -39,7 +38,7 @@ hazards from users.
 - **API:**
   - `POST /v1/hazards` — device posts a detected/reported hazard (auth via `X-Device-Id` + `X-Api-Key`)
   - `GET /v1/hazards?lat=&lng=&heading_deg=&speed_kmh=&radius_m=` — server computes a projected lookahead point using PostGIS `ST_Project` + `ST_DWithin` and returns hazards within range
-- **Distribution:** server pushes relevant hazards to in-range vehicles and to the mobile app; vehicle in-car display renders them via Feature 1's HUD
+- **Distribution:** server pushes relevant hazards to in-range vehicles and to the mobile app; vehicle in-car display renders them via Feature 1's Screen 
 - **Mobile app:** hazard map view, manual hazard upload form, user score display
 
 ## KPIs (from project deliverables)

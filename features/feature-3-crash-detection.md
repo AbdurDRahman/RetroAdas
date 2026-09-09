@@ -26,32 +26,29 @@ alert, with a short window for the driver to cancel a false alarm.
 4. Start a cancellation countdown (e.g. 10–15 seconds) during which the driver can dismiss a false alarm via a physical button or on-screen tap.
 5. If not cancelled within the countdown, automatically:
    - Send the vehicle's current GPS location and event details to an emergency contact / configured service
-   - Optionally push the event to the server as a hazard (`event_tag: "accident"`) so it's visible to other RetroADAS vehicles nearby (integration point with Feature 2 — needs confirmation)
+   - push the event to the server as a hazard (`event_tag: "accident"`) so it's visible to other RetroADAS vehicles nearby (integration point with Feature 2 — needs confirmation)
 6. Log the event (timestamp, sensor readings, GPS trace) locally for later review.
 
 ## Technical Approach
-- **Sensor:** Accelerometer + gyroscope (IMU), either a dedicated low-cost module (e.g. MPU6050 class) or reused from an existing sensor already on the platform if available
-- **Processing:** Lightweight threshold/rule-based detection is the natural MVP (e.g. |Δaccel_z| > threshold OR Δspeed/Δt > threshold); can evolve to a simple ML classifier later if false-positive rate is too high
-- **Compute:** Runs on Jetson (or a cheap always-on microcontroller if you want it independent of Jetson's boot/sleep state — worth deciding, since Jetson may be asleep in Sentry Mode but should NOT be asleep while driving)
+- **Sensor:** Accelerometer + gyroscope (IMU) 
+- **Processing:** Lightweight threshold/rule-based detection 
+- **Compute:** yet to decide (can be an independent microcontroller or can be added to jetson)
 - **Location:** GPS module (already planned as part of Embedded Systems domain)
 - **Notification:** SMS/call via a cellular module, or push via the mobile app + server if network connectivity exists
 
 ## KPIs (to define — not yet in your deck)
 - False positive rate (alarms triggered by potholes, hard braking, speed bumps, etc. that are NOT crashes)
-- False negative rate (real crashes missed)
-- Detection-to-alarm latency
 - Cancellation window duration (long enough for driver to react, short enough for real emergencies)
-- Notification delivery latency once countdown expires
 
 ## Dependencies / Components
-- IMU/accelerometer module — **not yet listed in your resource table, needs sourcing**
+
+- IMU/accelerometer module 
 - GPS module (shared with Embedded Systems domain)
-- Cellular/SMS capability or reliance on server+mobile app push (depends on connectivity assumptions)
-- Physical/on-screen cancel button
+- Physical cancel button
 
 ## Open Questions
 - **Ownership:** Which domain owns this? Likely Domain 4 (Embedded Systems — Jetson, GPS, sensors) with Domain 2 (Backend) for the notification/emergency-contact logic.
 - **Independence from Jetson state:** If Jetson is asleep (Sentry Mode) or between boot cycles, can this still function, or is it explicitly a "driving-only" feature?
-- **Threshold calibration:** What real-world data will you use to set the abrupt-motion thresholds? (You may need to either simulate crash-like motion safely or find an existing accelerometer crash dataset.)
+- **Threshold calibration:** What real-world data will you use to set the abrupt-motion thresholds? (You may need to either simulate crash-like motion safely or find an existing accelerometer crash dataset.) (important)
 - **Integration with Feature 2:** Should a confirmed crash auto-post to the shared hazards table so nearby cars slow down/reroute?
-- **Emergency contact mechanism:** Does this rely on the driver's phone (via a companion mobile app foreground/background service) or does the edge device need its own cellular connectivity? This affects hardware cost and design significantly.
+- **Emergency contact mechanism:** Does this rely on the driver's phone (via a companion mobile app foreground/background service) or does the edge device need its own cellular connectivity? This affects hardware cost and design significantly(important).

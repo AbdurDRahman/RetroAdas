@@ -7,11 +7,11 @@ multi-camera edge-AI pipeline, robust across normal and adverse weather
 simple 2D situational-awareness display.
 
 ## Scope
-- Object detection: vehicles, pedestrians (extendable to cyclists, animals, debris)
+- Object detection: cars , trucks , buses , motorcycles , pedestrians 
 - Distance / proximity estimation to detected objects
 - Multi-camera coverage: front, rear, left, right
 - Robustness across weather/lighting conditions
-- Real-time driver-facing visualization (HUD)
+- Real-time driver-facing visualization
 
 ## Functional Requirements
 1. Ingest synchronized video streams from 4 cameras (front/rear/left/right).
@@ -29,7 +29,7 @@ simple 2D situational-awareness display.
 - **Inference runtime:** TensorRT (optimized/quantized engine on Jetson)
 - **Video pipeline:** GStreamer with async queues per camera, NVMM zero-copy GPU memory to avoid CPU round-trips, NVStreamMux for batching multiple camera feeds into one inference pass
 - **Compute:** Jetson Orin Nano
-- **Output consumers:** On-screen HUD display, Hazard-Alert Controller (buzzer/audio), and the Feature 2 crowdsourcing pipeline (auto-detected hazards get pushed to server from here)
+- **Output consumers:** On-screen display, Hazard-Alert Controller (buzzer/audio), and the Feature 2 crowdsourcing pipeline (auto-detected hazards get pushed to server from here)
 
 ## Datasets (for training/fine-tuning + weather robustness)
 | Dataset | Purpose |
@@ -45,18 +45,18 @@ performance in adverse conditions.
 ## Display / UX Requirements
 - Simple 2-D lane-relative view (as shown in mockup): ego vehicle centered, other vehicles/hazards shown at approximate relative position and distance.
 - Severity indicator for the most urgent hazard (e.g. "Severity 1–3").
-- Status bar: speed, lane status, GPS lock, network status, active hazard count, cloud alert status, time.
+- Status bar: speed, lane status, GPS lock, network status, active hazard count, cloud alert status, time (?).
 - Must be glanceable — legible in under 1 second of driver attention.
 
 ## KPIs (from project deliverables)
-- Detection accuracy: ≥ 70% mAP
+- Detection accuracy: ≥ 60% mAP
 - Inference speed: ≥ 8 FPS
 - Alert latency (detection → driver alert): ≤ 1 s
 
 ## Dependencies / Components
 - Jetson Orin Nano (available)
 - 4x camera modules (available)
-- HUD/screen (available)
+- screen (available)
 - Trained YOLOv8n weights (to be trained on BDD100K + DAWN + RTTS)
 - DepthAnything model or equivalent, optimized for edge inference
 
