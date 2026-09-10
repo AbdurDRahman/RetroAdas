@@ -36,7 +36,7 @@ connects cars together, and the interfaces people actually touch.
 ```
                     ┌────────────────────────────┐
    Front Camera ───▶│                           │
-   Rear  Camera ───▶│     Jetson Orin Nano      │───▶ HUD Display
+   Rear  Camera ───▶│     Jetson Orin Nano      │───▶ Screen Display
    Left  Camera ───▶│ YOLOv8n + Depth · TensorRT│───▶ Audio Buzzer
    Right Camera ───▶│                           │
                     └─────────────┬──────────────┘
@@ -74,7 +74,7 @@ way to contribute reports of your own.
 
 - **Compute:** NVIDIA Jetson Orin Nano
 - **Vision:** 4x camera modules (front / rear / left / right)
-- **Display:** Dash-mounted HUD/screen
+- **Display:** Dash-mounted screen
 - **Backend:** Cloud server with a geospatial database
 - **Connectivity:** Network link between edge device, server, and mobile app
 
