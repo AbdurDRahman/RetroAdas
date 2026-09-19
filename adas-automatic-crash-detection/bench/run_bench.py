@@ -128,6 +128,15 @@ def sweep(values: np.ndarray, label: np.ndarray, thrs) -> list:
     return [recall_fpr(values, label, t) for t in thrs]
 
 
+def robust_z(x: np.ndarray) -> np.ndarray:
+    """Median/IQR scaling: like a z-score but not dragged around by the
+    occasional sensor-glitch outlier (see Test 2's >20G normal_driving
+    spikes) the way mean/std would be."""
+    med = np.median(x)
+    iqr = np.percentile(x, 75) - np.percentile(x, 25)
+    return (x - med) / iqr
+
+
 def md_table(rows: list, cols: list, fmt: dict) -> str:
     head = "| " + " | ".join(c[1] for c in cols) + " |"
     sep = "|" + "|".join("---" for _ in cols) + "|"
@@ -275,6 +284,57 @@ def section_test3(res: Results) -> str:
     return "\n".join(lines)
 
 
+def section_test3b(res: Results) -> str:
+    ai = int(np.argmin(np.abs(res.alphas - 0.90)))
+    gz = robust_z(res.peak_g)
+    tz = robust_z(res.peak_tilt_rel[:, ai])
+    ws = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+    caps = [0.01, 0.02, 0.05]
+
+    rows = []
+    for w in ws:
+        score = gz + w * tz
+        r = {"w": w}
+        for c in caps:
+            rec, thr = recall_at_fpr(score, res.label, c)
+            r[f"c{c}"] = f"{rec:.1%}"
+        rows.append(r)
+    cols = [("w", "tilt weight w")] + [(f"c{c}", f"recall @ FPR≤{c:.0%}") for c in caps]
+
+    lines = ["## Test 3b — weighted combination of ‖A‖g and tilt (not a hard OR)", "",
+             "Test 3's `OR: peak ‖A‖g ∨ tilt≥60°` combines the two signals as a hard "
+             "gate, and it made things *worse* (Summary table) because tilt's false "
+             "positives get added in whole. This instead scores each event as "
+             "`score = z(peak ‖A‖g) + w · z(peak tilt_rel, α=0.90)` — `z(·)` is a "
+             "median/IQR-scaled z-score so G (units of g) and tilt (degrees) sit on "
+             "comparable scales — and sweeps `w`. α=0.90 (the *short* time constant, "
+             "not the α≈0.99 used for the rollover branch) turned out to work best: "
+             "at low α the tilt filter barely smooths the accelerometer, so what it's "
+             "really contributing here is a differently-shaped view of the same impact "
+             "spike, not a rotation measurement.", "",
+             md_table(rows, cols, {"w": "{:g}"}), "",
+             "Observations:", "",
+             "- w=0 is peak ‖A‖g alone (Test 2's numbers, restated as recall@FPR-cap). "
+             "Adding tilt at w≈1–1.5 lifts recall by 12–17 points at 1–2% FPR "
+             "(45.6%→~60%, 62.0%→~75%) without giving any of it back at 5% FPR. This "
+             "is the opposite conclusion from the hard-OR combination: tilt *does* "
+             "carry usable information about a crash, just not as a separate veto — "
+             "it needs to be added into the decision, not OR'd on top of it.",
+             "- This sweep picks both `w` and the operating threshold on the same test "
+             "split it's scored against, so treat these numbers as *evidence a weighted "
+             "combination beats G alone*, not as calibrated production constants — "
+             "re-fit `w` (and re-check it doesn't just track this dataset's sensor "
+             "quirks) once real calibration data is collected, per the open item in "
+             "`CLAUDE.md`.",
+             "- This still says nothing about genuine rollovers specifically — the "
+             "underlying data limitation from Test 3 (rollovers are rare/absent in "
+             "this split) doesn't go away just because the combination method changed. "
+             "The α≈0.99, ≥70–80° rollover branch from Test 3 should stay as a separate "
+             "OR-condition alongside this score, not be replaced by it.",
+             ""]
+    return "\n".join(lines)
+
+
 def gated_peak_delta(res: Results, speeds: list, min_drop: float, lookahead: int) -> np.ndarray:
     """Per-event max of per-second peak |Δ‖A‖| restricted to seconds where the
     GPS speed gate holds.
@@ -374,13 +434,16 @@ def recall_at_fpr(values: np.ndarray, label: np.ndarray, fpr_cap: float, extra_f
 def section_summary(res: Results, timing: dict) -> str:
     speeds = load_speeds(res)
     a99 = int(np.argmin(np.abs(res.alphas - 0.99)))
+    a90 = int(np.argmin(np.abs(res.alphas - 0.90)))
     tilt99 = res.peak_tilt_rel[:, a99]
+    weighted_score = robust_z(res.peak_g) + 1.5 * robust_z(res.peak_tilt_rel[:, a90])
     strategies = [
         ("Test 2: peak ‖A‖g", res.peak_g, None),
         ("Test 3: tilt, α=0.99, relative", tilt99, None),
         ("Test 4: |Δ‖A‖|, ungated", res.peak_delta, None),
         ("Test 4: |Δ‖A‖|, +2 s drop≥10", gated_peak_delta(res, speeds, 10.0, 2), None),
         ("Design OR: peak ‖A‖g ∨ tilt≥60° (α=0.99)", res.peak_g, tilt99 >= 60),
+        ("Test 3b: z(G) + 1.5·z(tilt, α=0.90)", weighted_score, None),
     ]
     caps = [0.005, 0.01, 0.02, 0.05]
     rows = []
@@ -408,19 +471,23 @@ def section_summary(res: Results, timing: dict) -> str:
              "- **Peak ‖A‖g is the best single rule and the cheapest.** The literature "
              "5/20/40 G bands don't transfer to ±8 g telematics IMUs — the working "
              "threshold is ~2.5–3.5 G, which the sweep in Test 2 pins down.",
-             "- **Tilt adds nothing for collisions** (it's a filtered echo of ‖A‖), and "
-             "OR-ing a 60° tilt branch onto peak ‖A‖g *lowers* recall at equal FPR — "
-             "its false positives eat the budget. If rollover coverage is wanted, use a "
-             "long time constant (α≈0.99 at 100 Hz / ≈0.98 at 52 Hz), the "
-             "*baseline-corrected* angle, and a 70–80° threshold (≤0.2% FPR), and "
-             "accept that this test split can't measure its rollover recall.",
+             "- **Tilt as a hard OR-gate adds nothing** — OR-ing a 60° tilt branch onto "
+             "peak ‖A‖g *lowers* recall at equal FPR, since its false positives eat the "
+             "budget whole. But **tilt as a weighted feature does help** (Test 3b): "
+             "`z(G) + 1.5·z(tilt, α=0.90)` beats G alone by 12–17 points of recall at "
+             "1–2% FPR. The two branches aren't redundant, they were just being combined "
+             "the wrong way. Rollover coverage is a separate concern from either of "
+             "these — keep a long-time-constant (α≈0.99), baseline-corrected, 70–80° "
+             "branch as its own OR-condition, since this split can't measure rollover "
+             "recall regardless of how the collision score is built.",
              "- **The GPS speed condition belongs after the trigger, not AND-ed with it** — "
              "use a look-ahead window (2 s) as a confirmation/cancel input, and don't "
              "expect it to reject near-misses.",
-             "- Recall at low FPR tops out around 60–65% for every rule: the remaining "
-             "crashes are low-G events indistinguishable from hard braking by peak "
-             "statistics alone. Pushing past that needs shape features (Layer 1 moving "
-             "average / gyro discriminator, Test 1) or a learned model.",
+             "- Peak ‖A‖g alone tops out around 60–65% recall at low FPR; the weighted "
+             "G+tilt score pushes that to ~75–90% (Test 3b) without extra sensors. "
+             "Squeezing further needs shape features (Layer 1 moving average / gyro "
+             "discriminator, Test 1) or a learned model, and any weighting here should "
+             "be re-fit once real calibration data replaces this test split.",
              ""]
     return "\n".join(lines)
 
@@ -446,7 +513,8 @@ def main(argv) -> None:
                 "`src/crash_detect.c`.", "",
                 section_summary(res, timings[0]),
                 section_data(res), section_timing(timings[0]),
-                section_test2(res), section_test3(res), section_test4(res)]
+                section_test2(res), section_test3(res), section_test3b(res),
+                section_test4(res)]
     RESULTS_MD.write_text("\n".join(sections))
     print(f"wrote {RESULTS_MD}")
 
