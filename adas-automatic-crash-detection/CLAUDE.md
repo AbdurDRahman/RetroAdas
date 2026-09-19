@@ -4,20 +4,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-This directory has **no code yet** — it's the reserved home for Feature 3
-(Automatic Crash Detection) of the RetroADAS monorepo, one level up at `../`.
-There are no build/lint/test commands to document until implementation
-starts here. The design itself, though, is now fairly concrete (see below) —
-this is no longer a "figure out the architecture" problem, it's an
-"implement this spec" problem.
+This is the home for Feature 3 (Automatic Crash Detection) of the RetroADAS
+monorepo, one level up at `../`. The Layer 2 detectors exist as
+ESP32-portable C and have been benchmarked against VZCrash; Layer 1
+(Test 1 in `stats.md`) and the on-device firmware loop are not written yet.
 
-Read both of these before writing any code here:
+Read these before writing code here:
 - `../features/feature-3-crash-detection.md` — the original feature spec and
   open questions.
-- `info.md` (this directory) — feasibility research and the algorithm design
-  that resolves most of those open questions (hardware target, detection
-  math, thresholds, references). Treat `info.md` as the authoritative,
-  up-to-date design doc where it conflicts with the older feature spec.
+- `info.md` — feasibility research and the algorithm design (hardware
+  target, detection math, thresholds, references). Authoritative where it
+  conflicts with the older feature spec.
+- `stats.md` — the benchmark/test plan (Tests 1–4).
+- `results.md` — **generated** benchmark results for Tests 2–4 (accuracy
+  and per-sample cost). Read this before trusting any threshold in
+  `info.md`: the literature G-force bands do not transfer to this data.
+
+## Code layout & commands
+
+- `src/crash_detect.{h,c}` — the detectors, plain C99, float-only, no heap,
+  state in caller-owned structs. Meant to drop into an Arduino/ESP-IDF
+  project unchanged. One `*_update()` call per IMU sample.
+- `bench/export_events.py` — parquet → `data/bench/*.bin` (run once).
+- `bench/bench.c` — host harness: per-event peaks + ns/sample timing.
+- `bench/run_bench.py` — builds and runs the harness on both shards, sweeps
+  thresholds, writes `results.md`. Never edit `results.md` by hand.
+
+```bash
+.venv/bin/python3 bench/export_events.py        # once, ~1 min, 888 MB
+.venv/bin/python3 bench/run_bench.py            # build + run + results.md
+.venv/bin/python3 bench/run_bench.py --no-build # re-analyse cached peaks
+gcc -std=c99 -Wall -Wextra -c src/crash_detect.c -o /dev/null  # compile check
+```
+
+Commit convention here: one commit per block of code, message = what that
+block does (e.g. `Test 3: complementary-filter tilt estimator`), so the
+history reads as a walkthrough.
 
 The project-level overview is `../README.md`, and hardware context (Jetson
 Orin Nano, IMU/GPS modules, cellular options) is in `../hardware_bom.md`.
