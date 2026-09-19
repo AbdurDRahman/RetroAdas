@@ -226,6 +226,55 @@ def section_test2(res: Results) -> str:
     return "\n".join(lines)
 
 
+def tilt_grid(peaks: np.ndarray, alphas: np.ndarray, label: np.ndarray, thrs) -> str:
+    """Rows = alpha, cols = threshold, cell = crash recall / non-crash FPR."""
+    rows = []
+    for j, a in enumerate(alphas):
+        r = {"alpha": f"{a:.3f}", "tau": a * 0.01 / (1 - a)}
+        for t in thrs:
+            m = recall_fpr(peaks[:, j], label, t)
+            r[f"t{t}"] = f"{m['recall']:.1%} / {m['fpr']:.1%}"
+        rows.append(r)
+    cols = [("alpha", "α"), ("tau", "τ (s) @100Hz")] + [(f"t{t}", f"≥{t}°") for t in thrs]
+    return md_table(rows, cols, {"tau": "{:.2f}"})
+
+
+def section_test3(res: Results) -> str:
+    thrs = [30, 46, 60, 70, 80]
+    a96 = int(np.argmin(np.abs(res.alphas - 0.96)))
+    lines = ["## Test 3 — complementary-filter tilt / rollover (`tilt_filter_update`)", "",
+             "Peak of max(|pitch−pitch₀|, |roll−roll₀|) per event, where the ₀ baseline "
+             "is latched 1 s in (mounting offset). Cells are **crash recall / non-crash "
+             "FPR**. τ = α·Δt/(1−α) is the filter time constant — the same α gives a "
+             "shorter τ at 100 Hz than at 52 Hz, so the 52 Hz design range 0.90–0.98 "
+             "maps to roughly 0.95–0.99 here.", "",
+             f"Distribution of peak relative tilt at α={res.alphas[a96]:.2f}:", "",
+             percentile_rows(res.peak_tilt_rel[:, a96], res.label), "",
+             "### Relative to mounting baseline", "",
+             tilt_grid(res.peak_tilt_rel, res.alphas, res.label, thrs), "",
+             "### Absolute (no baseline correction)", "",
+             tilt_grid(res.peak_tilt_abs, res.alphas, res.label, thrs), "",
+             "Observations:", "",
+             "- Tilt is a poor *collision* detector on this data: the accel-derived angle "
+             "is corrupted by the very linear accelerations a crash produces, so what the "
+             "filter sees is a short-lived pseudo-tilt spike, and its size scales with "
+             "‖A‖ rather than with any real rotation. Higher α (longer τ) suppresses "
+             "that spike and recall collapses toward zero.",
+             "- The 46° threshold (Ibrahim et al.) is inside the normal-driving noise "
+             "floor at low α; the 70–80° thresholds (Chikaka & Longe) have near-zero "
+             "FPR but also near-zero recall. Genuine rollovers are rare/absent in the "
+             "test split, so this test says nothing about rollover recall — only that "
+             "tilt should be an OR-branch for rollover, not the primary collision path.",
+             "- The ~5–6% of crashes that still exceed 60° at τ≈1–2 s (α≥0.99) are "
+             "*sustained* orientation changes — consistent with rollovers or vehicles "
+             "coming to rest tilted. That is the population the tilt branch exists for, "
+             "and it catches them at ≤0.4% FPR.",
+             "- Absolute tilt without baseline correction is unusable: devices are mounted "
+             "at arbitrary angles, so many events start above 30°.",
+             ""]
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 
 def main(argv) -> None:
@@ -246,7 +295,7 @@ def main(argv) -> None:
                 "Design in `info.md`, test plan in `stats.md`, detector code in "
                 "`src/crash_detect.c`.", "",
                 section_data(res), section_timing(timings[0]),
-                section_test2(res)]
+                section_test2(res), section_test3(res)]
     RESULTS_MD.write_text("\n".join(sections))
     print(f"wrote {RESULTS_MD}")
 
