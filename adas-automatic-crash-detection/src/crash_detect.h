@@ -102,6 +102,42 @@ void tilt_filter_init(tilt_state_t *st);
 float tilt_filter_update(const tilt_cfg_t *cfg, tilt_state_t *st,
                          const imu_sample_t *s);
 
+/* ------------------------------------------------------------------------
+ * Layer 2 / Test 4 — consecutive-delta + speed-drop rule (Ibrahim et al.)
+ *
+ *   Collision = (|‖A‖[n] - ‖A‖[n-1]| > delta_g) AND (GPS speed dropping)
+ *
+ * GPS runs at ~1 Hz, the IMU at 52–100 Hz, so speed is fed in separately
+ * via delta_speed_feed_speed() whenever a fix arrives; the gate holds the
+ * "dropping" flag until the next fix. Deltas are in g between consecutive
+ * samples, so delta_g is tied to the IMU data rate.
+ * ---------------------------------------------------------------------- */
+typedef struct {
+    float delta_g;        /* |Δ‖A‖| threshold, g */
+    float min_drop_kmh;   /* speed must fall by at least this between fixes */
+} delta_cfg_t;
+
+typedef struct {
+    float prev_mag;
+    float prev_speed;
+    bool have_mag;
+    bool have_speed;
+    bool dropping;
+} delta_state_t;
+
+void delta_speed_init(delta_state_t *st);
+
+/* Call on each GPS fix. */
+void delta_speed_feed_speed(const delta_cfg_t *cfg, delta_state_t *st,
+                            float speed_kmh);
+
+/* Call on each IMU sample. Returns true when both conditions hold. If
+ * out_delta is non-NULL the raw |Δ‖A‖| is stored there (0 on the first
+ * sample), and out_dropping gets the current speed-gate flag. */
+bool delta_speed_update(const delta_cfg_t *cfg, delta_state_t *st,
+                        const imu_sample_t *s, float *out_delta,
+                        bool *out_dropping);
+
 #ifdef __cplusplus
 }
 #endif

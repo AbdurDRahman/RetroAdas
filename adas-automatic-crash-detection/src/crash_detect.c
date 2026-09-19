@@ -71,3 +71,43 @@ float tilt_filter_update(const tilt_cfg_t *cfg, tilt_state_t *st,
     float dr = fabsf(st->roll - st->roll0);
     return dp > dr ? dp : dr;
 }
+
+/* ---- Test 4: consecutive-delta + speed-drop ----------------------------- */
+
+void delta_speed_init(delta_state_t *st)
+{
+    st->prev_mag = 0.0f;
+    st->prev_speed = 0.0f;
+    st->have_mag = false;
+    st->have_speed = false;
+    st->dropping = false;
+}
+
+void delta_speed_feed_speed(const delta_cfg_t *cfg, delta_state_t *st,
+                            float speed_kmh)
+{
+    if (st->have_speed) {
+        st->dropping = (st->prev_speed - speed_kmh) >= cfg->min_drop_kmh &&
+                       speed_kmh < st->prev_speed;
+    }
+    st->prev_speed = speed_kmh;
+    st->have_speed = true;
+}
+
+bool delta_speed_update(const delta_cfg_t *cfg, delta_state_t *st,
+                        const imu_sample_t *s, float *out_delta,
+                        bool *out_dropping)
+{
+    float mag = imu_accel_mag(s);
+    float delta = st->have_mag ? fabsf(mag - st->prev_mag) : 0.0f;
+    st->prev_mag = mag;
+    st->have_mag = true;
+
+    if (out_delta) {
+        *out_delta = delta;
+    }
+    if (out_dropping) {
+        *out_dropping = st->dropping;
+    }
+    return st->dropping && delta > cfg->delta_g;
+}
