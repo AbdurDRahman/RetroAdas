@@ -13,15 +13,16 @@ Best crash recall each strategy reaches while keeping the non-crash false-positi
 | Test 4: |Δ‖A‖|, ungated | 13.2% @ 3.4 | 26.8% @ 2.9 | 47.3% @ 2.3 | 77.3% @ 1.4 |
 | Test 4: |Δ‖A‖|, +2 s drop≥10 | 21.8% @ 2.7 | 40.3% @ 2.1 | 57.6% @ 1.4 | 74.3% @ 0.78 |
 | Design OR: peak ‖A‖g ∨ tilt≥60° (α=0.99) | 24.2% @ 5.2 | 40.3% @ 4.5 | 58.6% @ 3.9 | 86.6% @ 2.6 |
+| Test 3b: z(G) + 1.5·z(tilt, α=0.90) | 46.0% @ 6.1 | 59.3% @ 5.1 | 75.2% @ 4 | 92.0% @ 2.4 |
 
 Speed, net ns/sample on the host: `gforce_band` (1.6 ns) < `delta_speed` (2.5 ns) < `tilt_filter` (30.7 ns). All three are far inside the 52 Hz budget; the tilt filter's two `atan2f` calls make it the only one that costs anything measurable.
 
 Takeaways for the design:
 
 - **Peak ‖A‖g is the best single rule and the cheapest.** The literature 5/20/40 G bands don't transfer to ±8 g telematics IMUs — the working threshold is ~2.5–3.5 G, which the sweep in Test 2 pins down.
-- **Tilt adds nothing for collisions** (it's a filtered echo of ‖A‖), and OR-ing a 60° tilt branch onto peak ‖A‖g *lowers* recall at equal FPR — its false positives eat the budget. If rollover coverage is wanted, use a long time constant (α≈0.99 at 100 Hz / ≈0.98 at 52 Hz), the *baseline-corrected* angle, and a 70–80° threshold (≤0.2% FPR), and accept that this test split can't measure its rollover recall.
+- **Tilt as a hard OR-gate adds nothing** — OR-ing a 60° tilt branch onto peak ‖A‖g *lowers* recall at equal FPR, since its false positives eat the budget whole. But **tilt as a weighted feature does help** (Test 3b): `z(G) + 1.5·z(tilt, α=0.90)` beats G alone by 12–17 points of recall at 1–2% FPR. The two branches aren't redundant, they were just being combined the wrong way. Rollover coverage is a separate concern from either of these — keep a long-time-constant (α≈0.99), baseline-corrected, 70–80° branch as its own OR-condition, since this split can't measure rollover recall regardless of how the collision score is built.
 - **The GPS speed condition belongs after the trigger, not AND-ed with it** — use a look-ahead window (2 s) as a confirmation/cancel input, and don't expect it to reject near-misses.
-- Recall at low FPR tops out around 60–65% for every rule: the remaining crashes are low-G events indistinguishable from hard braking by peak statistics alone. Pushing past that needs shape features (Layer 1 moving average / gyro discriminator, Test 1) or a learned model.
+- Peak ‖A‖g alone tops out around 60–65% recall at low FPR; the weighted G+tilt score pushes that to ~75–90% (Test 3b) without extra sensors. Squeezing further needs shape features (Layer 1 moving average / gyro discriminator, Test 1) or a learned model, and any weighting here should be re-fit once real calibration data replaces this test split.
 
 ## Data
 
@@ -116,6 +117,26 @@ Observations:
 - The 46° threshold (Ibrahim et al.) is inside the normal-driving noise floor at low α; the 70–80° thresholds (Chikaka & Longe) have near-zero FPR but also near-zero recall. Genuine rollovers are rare/absent in the test split, so this test says nothing about rollover recall — only that tilt should be an OR-branch for rollover, not the primary collision path.
 - The ~5–6% of crashes that still exceed 60° at τ≈1–2 s (α≥0.99) are *sustained* orientation changes — consistent with rollovers or vehicles coming to rest tilted. That is the population the tilt branch exists for, and it catches them at ≤0.4% FPR.
 - Absolute tilt without baseline correction is unusable: devices are mounted at arbitrary angles, so many events start above 30°.
+
+## Test 3b — weighted combination of ‖A‖g and tilt (not a hard OR)
+
+Test 3's `OR: peak ‖A‖g ∨ tilt≥60°` combines the two signals as a hard gate, and it made things *worse* (Summary table) because tilt's false positives get added in whole. This instead scores each event as `score = z(peak ‖A‖g) + w · z(peak tilt_rel, α=0.90)` — `z(·)` is a median/IQR-scaled z-score so G (units of g) and tilt (degrees) sit on comparable scales — and sweeps `w`. α=0.90 (the *short* time constant, not the α≈0.99 used for the rollover branch) turned out to work best: at low α the tilt filter barely smooths the accelerometer, so what it's really contributing here is a differently-shaped view of the same impact spike, not a rotation measurement.
+
+| tilt weight w | recall @ FPR≤1% | recall @ FPR≤2% | recall @ FPR≤5% |
+|---|---|---|---|
+| 0 | 45.6% | 62.0% | 87.3% |
+| 0.5 | 52.1% | 67.8% | 90.4% |
+| 1 | 57.5% | 72.9% | 91.5% |
+| 1.5 | 59.3% | 75.2% | 92.0% |
+| 2 | 61.0% | 75.7% | 91.5% |
+| 2.5 | 63.0% | 76.2% | 90.7% |
+| 3 | 62.4% | 75.8% | 90.0% |
+
+Observations:
+
+- w=0 is peak ‖A‖g alone (Test 2's numbers, restated as recall@FPR-cap). Adding tilt at w≈1–1.5 lifts recall by 12–17 points at 1–2% FPR (45.6%→~60%, 62.0%→~75%) without giving any of it back at 5% FPR. This is the opposite conclusion from the hard-OR combination: tilt *does* carry usable information about a crash, just not as a separate veto — it needs to be added into the decision, not OR'd on top of it.
+- This sweep picks both `w` and the operating threshold on the same test split it's scored against, so treat these numbers as *evidence a weighted combination beats G alone*, not as calibrated production constants — re-fit `w` (and re-check it doesn't just track this dataset's sensor quirks) once real calibration data is collected, per the open item in `CLAUDE.md`.
+- This still says nothing about genuine rollovers specifically — the underlying data limitation from Test 3 (rollovers are rare/absent in this split) doesn't go away just because the combination method changed. The α≈0.99, ≥70–80° rollover branch from Test 3 should stay as a separate OR-condition alongside this score, not be replaced by it.
 
 ## Test 4 — consecutive-delta + GPS speed drop (`delta_speed_update`)
 
