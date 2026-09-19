@@ -41,6 +41,35 @@ static inline float imu_gyro_mag(const imu_sample_t *s)
     return sqrtf(s->gx * s->gx + s->gy * s->gy + s->gz * s->gz);
 }
 
+/* ------------------------------------------------------------------------
+ * Layer 2 / Test 2 — G-force magnitude banding (Razali et al. 2021)
+ *
+ *   No accident  ‖A‖g <  mild_g      (5 G in the literature)
+ *   Mild         ‖A‖g <  moderate_g  (20 G)
+ *   Moderate     ‖A‖g <  severe_g    (40 G)
+ *   Severe       otherwise
+ * ---------------------------------------------------------------------- */
+typedef enum {
+    GFORCE_NONE = 0,
+    GFORCE_MILD = 1,
+    GFORCE_MODERATE = 2,
+    GFORCE_SEVERE = 3,
+} gforce_band_t;
+
+typedef struct {
+    float mild_g;
+    float moderate_g;
+    float severe_g;
+} gforce_cfg_t;
+
+#define GFORCE_CFG_LITERATURE { 5.0f, 20.0f, 40.0f }
+
+/* Stateless: classify one sample. If out_mag is non-NULL, ‖A‖g is stored
+ * there so the caller can keep a running peak without recomputing. */
+gforce_band_t gforce_band_update(const gforce_cfg_t *cfg,
+                                 const imu_sample_t *s,
+                                 float *out_mag);
+
 #ifdef __cplusplus
 }
 #endif
