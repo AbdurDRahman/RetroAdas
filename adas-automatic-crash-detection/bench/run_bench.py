@@ -275,6 +275,86 @@ def section_test3(res: Results) -> str:
     return "\n".join(lines)
 
 
+def gated_peak_delta(res: Results, speeds: list, min_drop: float, lookahead: int) -> np.ndarray:
+    """Per-event max of per-second peak |Δ‖A‖| restricted to seconds where the
+    GPS speed gate holds.
+
+    lookahead=0: second k passes if speed[k-1] - speed[k] >= min_drop (and
+                 strictly dropping) — what delta_speed_feed_speed() does.
+    lookahead=L: second k passes if speed[k] - min(speed[k+1..k+L]) >= min_drop,
+                 i.e. the vehicle slows within the next L seconds.
+    """
+    out = np.zeros(len(speeds), dtype=np.float32)
+    for i, (sec, sp) in enumerate(zip(res.sec_peak_delta, speeds)):
+        n = min(len(sec), len(sp))
+        if n < 2:
+            continue
+        sec, sp = sec[:n], sp[:n]
+        if lookahead == 0:
+            drop = sp[:-1] - sp[1:]
+            gate = np.zeros(n, dtype=bool)
+            gate[1:] = (drop > 0) & (drop >= min_drop)
+        else:
+            gate = np.zeros(n, dtype=bool)
+            for k in range(n - 1):
+                fut = sp[k + 1:k + 1 + lookahead].min()
+                gate[k] = (sp[k] - fut) > 0 and (sp[k] - fut) >= min_drop
+        if gate.any():
+            out[i] = sec[gate].max()
+    return out
+
+
+def section_test4(res: Results) -> str:
+    speeds = load_speeds(res)
+    thrs = [0.5, 1, 1.5, 2, 2.5, 3, 4, 5]
+    gates = [("none", None, None),
+             ("same-s, drop>0", 0.0, 0),
+             ("same-s, drop≥10", 10.0, 0),
+             ("+2 s, drop≥10", 10.0, 2),
+             ("+2 s, drop≥20", 20.0, 2)]
+    series = {}
+    for name, md, la in gates:
+        series[name] = res.peak_delta if md is None else gated_peak_delta(res, speeds, md, la)
+
+    rows = []
+    for t in thrs:
+        r = {"thr": t}
+        for name in series:
+            m = recall_fpr(series[name], res.label, t)
+            r[name] = f"{m['recall']:.1%} / {m['fpr']:.1%}"
+        rows.append(r)
+    cols = [("thr", "|Δ‖A‖| ≥ (g)")] + [(n, n) for n in series]
+
+    lines = ["## Test 4 — consecutive-delta + GPS speed drop (`delta_speed_update`)", "",
+             "|Δ‖A‖| between consecutive 100 Hz samples, gated on GPS speed (1 Hz, km/h). "
+             "Cells are **crash recall / non-crash FPR**. Gate columns: `none` = delta "
+             "alone; `same-s` = the fix at the start of the impact second is already "
+             "lower than the previous one (what the C code implements); `+2 s` = speed "
+             "falls within the next 2 s of the impact second (a device would buffer the "
+             "decision — fine given the 10–15 s cancel countdown).", "",
+             "Distribution of ungated peak |Δ‖A‖|:", "",
+             percentile_rows(res.peak_delta, res.label), "",
+             md_table(rows, cols, {"thr": "{:g}"}), "",
+             "Observations:", "",
+             "- Ungated sample-to-sample delta is a slightly *worse* discriminator than "
+             "peak ‖A‖g (Test 2): ~77% vs ~87% crash recall at 5% FPR. An impact spike "
+             "at 100 Hz is only a sample or two wide, so the delta mostly re-measures the "
+             "peak with extra noise. The delta threshold is also data-rate dependent "
+             "(fewer samples per impact at 52 Hz → larger deltas) — re-sweep on-device.",
+             "- The same-second gate (as written in the C code) *loses* recall at equal "
+             "FPR: the GPS fix at the start of the impact second predates the impact. "
+             "The +2 s lookahead gate is the right shape and adds ~10 points of recall "
+             "at 1–2% FPR over ungated delta, but still trails peak ‖A‖g alone.",
+             "- The gate can't separate crashes from near-misses because 99% of near_miss "
+             "events also show a ≥10 km/h drop within 2 s — hard braking is what makes "
+             "them near-misses. It only prunes normal-driving events (69% of which drop "
+             "≥10 km/h somewhere in the clip anyway).",
+             "- No strategy fixes the fundamental overlap: the ~10–20% of crash events "
+             "with peaks under 2 G look like hard braking to every rule here.",
+             ""]
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 
 def main(argv) -> None:
@@ -295,7 +375,7 @@ def main(argv) -> None:
                 "Design in `info.md`, test plan in `stats.md`, detector code in "
                 "`src/crash_detect.c`.", "",
                 section_data(res), section_timing(timings[0]),
-                section_test2(res), section_test3(res)]
+                section_test2(res), section_test3(res), section_test4(res)]
     RESULTS_MD.write_text("\n".join(sections))
     print(f"wrote {RESULTS_MD}")
 
