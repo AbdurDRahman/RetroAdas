@@ -10,8 +10,8 @@ Best crash recall each strategy reaches while keeping the non-crash false-positi
 |---|---|---|---|---|
 | Test 2: peak ‖A‖g | 32.5% @ 4.8 | 45.6% @ 4.3 | 62.0% @ 3.7 | 87.3% @ 2.6 |
 | Test 3: tilt, α=0.99, relative | 6.3% @ 50 | 7.9% @ 41 | 12.0% @ 36 | 23.4% @ 31 |
-| Test 4: |Δ‖A‖|, ungated | 13.2% @ 3.4 | 26.8% @ 2.9 | 47.3% @ 2.3 | 77.3% @ 1.4 |
-| Test 4: |Δ‖A‖|, +2 s drop≥10 | 21.8% @ 2.7 | 40.3% @ 2.1 | 57.6% @ 1.4 | 74.3% @ 0.78 |
+| Test 4: Δ‖A‖, ungated | 13.2% @ 3.4 | 26.8% @ 2.9 | 47.3% @ 2.3 | 77.3% @ 1.4 |
+| Test 4: Δ‖A‖, +2 s drop≥10 | 21.8% @ 2.7 | 40.3% @ 2.1 | 57.6% @ 1.4 | 74.3% @ 0.78 |
 | Design OR: peak ‖A‖g ∨ tilt≥60° (α=0.99) | 24.2% @ 5.2 | 40.3% @ 4.5 | 58.6% @ 3.9 | 86.6% @ 2.6 |
 | Test 3b: z(G) + 1.5·z(tilt, α=0.90) | 46.0% @ 6.1 | 59.3% @ 5.1 | 75.2% @ 4 | 92.0% @ 2.4 |
 
@@ -140,9 +140,9 @@ Observations:
 
 ## Test 4 — consecutive-delta + GPS speed drop (`delta_speed_update`)
 
-|Δ‖A‖| between consecutive 100 Hz samples, gated on GPS speed (1 Hz, km/h). Cells are **crash recall / non-crash FPR**. Gate columns: `none` = delta alone; `same-s` = the fix at the start of the impact second is already lower than the previous one (what the C code implements); `+2 s` = speed falls within the next 2 s of the impact second (a device would buffer the decision — fine given the 10–15 s cancel countdown).
+Δ‖A‖ between consecutive 100 Hz samples, gated on GPS speed (1 Hz, km/h). Cells are **crash recall / non-crash FPR**. Gate columns: `none` = delta alone; `same-s` = the fix at the start of the impact second is already lower than the previous one (what the C code implements); `+2 s` = speed falls within the next 2 s of the impact second (a device would buffer the decision — fine given the 10–15 s cancel countdown).
 
-Distribution of ungated peak |Δ‖A‖|:
+Distribution of ungated peak Δ‖A‖:
 
 | label | n | p50 | p90 | p99 | max |
 |---|---|---|---|---|---|
@@ -150,7 +150,7 @@ Distribution of ungated peak |Δ‖A‖|:
 | near_miss | 3633 | 0.34 | 0.85 | 2.39 | 3.88 |
 | normal_driving | 16320 | 0.36 | 0.94 | 2.97 | 41.60 |
 
-| |Δ‖A‖| ≥ (g) | none | same-s, drop>0 | same-s, drop≥10 | +2 s, drop≥10 | +2 s, drop≥20 |
+| Δ‖A‖ ≥ (g) | none | same-s, drop>0 | same-s, drop≥10 | +2 s, drop≥10 | +2 s, drop≥20 |
 |---|---|---|---|---|---|
 | 0.5 | 98.8% / 30.6% | 77.3% / 16.9% | 39.7% / 3.9% | 80.5% / 10.3% | 58.7% / 5.6% |
 | 1 | 89.9% / 8.7% | 65.3% / 4.8% | 29.1% / 1.2% | 68.9% / 3.4% | 46.9% / 1.9% |
