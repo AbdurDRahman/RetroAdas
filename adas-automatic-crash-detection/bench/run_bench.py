@@ -137,15 +137,22 @@ def robust_z(x: np.ndarray) -> np.ndarray:
     return (x - med) / iqr
 
 
+def _md_cell(s: str) -> str:
+    """Escape literal '|' so it can't be mistaken for a table-cell delimiter
+    (e.g. absolute-value bars in a label like '|Δ‖A‖|')."""
+    return s.replace("|", "\\|")
+
+
 def md_table(rows: list, cols: list, fmt: dict) -> str:
-    head = "| " + " | ".join(c[1] for c in cols) + " |"
+    head = "| " + " | ".join(_md_cell(c[1]) for c in cols) + " |"
     sep = "|" + "|".join("---" for _ in cols) + "|"
     body = []
     for r in rows:
         cells = []
         for key, _ in cols:
             v = r[key]
-            cells.append(fmt.get(key, "{}").format(v) if not (isinstance(v, float) and np.isnan(v)) else "–")
+            cell = fmt.get(key, "{}").format(v) if not (isinstance(v, float) and np.isnan(v)) else "–"
+            cells.append(_md_cell(cell))
         body.append("| " + " | ".join(cells) + " |")
     return "\n".join([head, sep, *body])
 
@@ -383,16 +390,16 @@ def section_test4(res: Results) -> str:
             m = recall_fpr(series[name], res.label, t)
             r[name] = f"{m['recall']:.1%} / {m['fpr']:.1%}"
         rows.append(r)
-    cols = [("thr", "|Δ‖A‖| ≥ (g)")] + [(n, n) for n in series]
+    cols = [("thr", "Δ‖A‖ ≥ (g)")] + [(n, n) for n in series]
 
     lines = ["## Test 4 — consecutive-delta + GPS speed drop (`delta_speed_update`)", "",
-             "|Δ‖A‖| between consecutive 100 Hz samples, gated on GPS speed (1 Hz, km/h). "
+             "Δ‖A‖ between consecutive 100 Hz samples, gated on GPS speed (1 Hz, km/h). "
              "Cells are **crash recall / non-crash FPR**. Gate columns: `none` = delta "
              "alone; `same-s` = the fix at the start of the impact second is already "
              "lower than the previous one (what the C code implements); `+2 s` = speed "
              "falls within the next 2 s of the impact second (a device would buffer the "
              "decision — fine given the 10–15 s cancel countdown).", "",
-             "Distribution of ungated peak |Δ‖A‖|:", "",
+             "Distribution of ungated peak Δ‖A‖:", "",
              percentile_rows(res.peak_delta, res.label), "",
              md_table(rows, cols, {"thr": "{:g}"}), "",
              "Observations:", "",
@@ -440,8 +447,8 @@ def section_summary(res: Results, timing: dict) -> str:
     strategies = [
         ("Test 2: peak ‖A‖g", res.peak_g, None),
         ("Test 3: tilt, α=0.99, relative", tilt99, None),
-        ("Test 4: |Δ‖A‖|, ungated", res.peak_delta, None),
-        ("Test 4: |Δ‖A‖|, +2 s drop≥10", gated_peak_delta(res, speeds, 10.0, 2), None),
+        ("Test 4: Δ‖A‖, ungated", res.peak_delta, None),
+        ("Test 4: Δ‖A‖, +2 s drop≥10", gated_peak_delta(res, speeds, 10.0, 2), None),
         ("Design OR: peak ‖A‖g ∨ tilt≥60° (α=0.99)", res.peak_g, tilt99 >= 60),
         ("Test 3b: z(G) + 1.5·z(tilt, α=0.90)", weighted_score, None),
     ]
