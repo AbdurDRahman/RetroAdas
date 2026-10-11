@@ -1,27 +1,27 @@
-// Command server boots the ADAS cloud API described in api_design.md.
+// Command server boots the ADAS cloud API described in docs/design.md.
 package main
 
 import (
 	"log"
 	"net/http"
 
-	"github.com/YOUR-ORG/adas-cloud/config"
-	"github.com/YOUR-ORG/adas-cloud/database"
+	"github.com/AbdurDRahman/RetroAdas/adas-cloud/config"
+	"github.com/AbdurDRahman/RetroAdas/adas-cloud/database"
 )
 
 func main() {
-	cfg, err := config.Load()
+	configuration, err := config.Load()
 	if err != nil {
 		log.Fatalf("config error: %v", err)
 	}
 
-	db, err := database.Connect(cfg.DatabaseURL)
+	connectionPool, err := database.Connect(configuration.DatabaseURL)
 	if err != nil {
 		log.Fatalf("database connection error: %v", err)
 	}
-	defer db.Close()
+	defer connectionPool.Close()
 
-	mux := http.NewServeMux()
+	router := http.NewServeMux()
 
 	// TODO: wire up the three endpoints once their underlying packages are
 	// green under TDD:
@@ -30,6 +30,6 @@ func main() {
 	//   GET  /v1/hazards           -> internal/hazards.FindNearby
 	// Each handler authenticates via internal/devices.Authenticate first.
 
-	log.Printf("listening on :%s", cfg.ServerPort)
-	log.Fatal(http.ListenAndServe(":"+cfg.ServerPort, mux))
+	log.Printf("listening on :%s", configuration.ServerPort)
+	log.Fatal(http.ListenAndServe(":"+configuration.ServerPort, router))
 }

@@ -1,0 +1,15 @@
+# Real credentials. Only the template (.env.example) is committed — copy it
+# to .env and fill in real values. The "!" line re-includes the template in
+# case a broader pattern ever matches it.
+.env
+.env.*
+!.env.example
+
+# Binaries from `go build ./cmd/...` run in this folder.
+/server
+/provision
+/cleanup
+
+# Go test coverage output.
+*.out
+coverage.html

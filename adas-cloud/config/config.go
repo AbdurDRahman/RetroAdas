@@ -25,18 +25,18 @@ type Config struct {
 // anything required is missing, rather than silently falling back to a
 // default that could mask a misconfigured environment.
 func Load() (*Config, error) {
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is not set (see .env.example)")
 	}
 
-	port := os.Getenv("SERVER_PORT")
-	if port == "" {
-		port = "8080"
+	serverPort := os.Getenv("SERVER_PORT")
+	if serverPort == "" {
+		serverPort = "8080"
 	}
 
 	return &Config{
-		DatabaseURL: dbURL,
-		ServerPort:  port,
+		DatabaseURL: databaseURL,
+		ServerPort:  serverPort,
 	}, nil
 }

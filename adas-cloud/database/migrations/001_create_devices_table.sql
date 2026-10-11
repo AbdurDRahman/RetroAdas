@@ -1,6 +1,6 @@
 -- Trusted device registry. Every write request (POST /v1/hazards,
 -- POST /v1/devices/handshake) is authenticated against this table.
--- See database_schema.md, Section 3.
+-- See docs/design.md, sections 7 and 9.
 
 CREATE TABLE IF NOT EXISTS devices (
     device_id     TEXT PRIMARY KEY,

@@ -243,7 +243,53 @@ measurable numbers:
 
 ---
 
-## 12. Decision log
+## 12. Naming — Agreed
+
+Every name is written in full words — in Go code, JSON fields, query parameters and database
+columns alike. Only universal acronyms stay short: `ID`, `URL`, `API`, `HTTP`, `JSON`, `SQL`.
+Units are part of the name and spelled out (`_meters`, `_degrees`, `_kilometers_per_hour`).
+JSON fields, query parameters and database columns use `snake_case`; Go uses its usual
+`CamelCase`.
+
+Renamed while nothing is built on them yet (C-006). The early drafts (`../api_design.md`,
+`../database_schema.md`) still show the old names.
+
+**JSON fields and query parameters**
+
+| Old | New |
+|---|---|
+| `lat` | `latitude` |
+| `lng` | `longitude` |
+| `heading_deg` | `heading_degrees` |
+| `speed_kmh` | `speed_kilometers_per_hour` |
+| `radius_m` | `radius_meters` |
+| `distance_m` | `distance_meters` |
+| `poll_interval_distance_m` | `poll_distance_meters` |
+| `lookahead_m` | `lookahead_distance_meters` |
+| `hazard_radius_m` | `search_radius_meters` |
+
+Unchanged (already full words or allowed acronyms): `device_id`, `device_type`, `event_tag`,
+`confidence`, `confirmations`, `status`, `id`, `expires_at`, and the headers `X-Device-Id`,
+`X-Api-Key`.
+
+**Database columns and indexes**
+
+| Table | Old | New |
+|---|---|---|
+| `hazards` | `heading_deg` | `heading_degrees` |
+| `hazards` | index `hazards_geo_idx` | `hazards_location_index` |
+| `hazards` | index `hazards_expiry_idx` | `hazards_expires_at_index` |
+| `hazards` | index `hazards_tag_idx` | `hazards_event_tag_index` |
+
+All other columns are already full words (`device_id`, `api_key_hash`, `device_type`,
+`created_at`, `revoked`, `event_tag`, `location`, `confidence`, `reported_by`,
+`confirmations`, `expires_at`). The two existing migrations are edited in place — nothing has
+been deployed, so no follow-up migration is needed; local databases are reset with
+`docker compose down -v`.
+
+---
+
+## 13. Decision log
 
 | Decision | Where |
 |---|---|
@@ -252,3 +298,4 @@ measurable numbers:
 | One generic API for every producer; per-tag policy lives on the server | Sections 2–4 |
 | Each device confirms a hazard at most once; nearest match wins | Section 6 |
 | Sharing-time indicator split into server latency + polling staleness | Section 11 |
+| Full-word names everywhere, including JSON fields and database columns; only `ID`, `URL`, `API`, `HTTP`, `JSON`, `SQL` stay short | Section 12 |

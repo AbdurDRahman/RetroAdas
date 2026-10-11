@@ -1,81 +1,82 @@
 package hazards_test
 
 import (
+	"database/sql"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/YOUR-ORG/adas-cloud/internal/hazards"
-	testdb "github.com/YOUR-ORG/adas-cloud/database/testing"
+	"github.com/AbdurDRahman/RetroAdas/adas-cloud/database/testdatabase"
+	"github.com/AbdurDRahman/RetroAdas/adas-cloud/internal/hazards"
 )
 
 // TestProcessReport is the primary TDD loop for this project — this is the
-// core business logic (dedup-on-write) described in database_schema.md
-// Section 4. Run it now, watch it fail, then implement
+// core business logic (deduplication-on-write) described in docs/design.md
+// section 6. Run it now, watch it fail, then implement
 // hazards.ProcessReport until every case here passes.
-func TestProcessReport(t *testing.T) {
-	tests := []struct {
-		name             string
-		existingHazard   *existingHazard // nil = table starts empty
-		incoming         hazards.Report
-		wantStatus       string
-		wantConfirmCount int
+func TestProcessReport(test *testing.T) {
+	testCases := []struct {
+		name                  string
+		hazardToSeed          *seededHazard // nil = table starts empty
+		incomingReport        hazards.Report
+		expectedStatus        string
+		expectedConfirmations int
 	}{
 		{
-			name:           "no existing hazard nearby -> new row created",
-			existingHazard: nil,
-			incoming: hazards.Report{
-				EventTag: "pothole", Lat: 33.6850, Lng: 73.0490, ReportedBy: "veh-0427",
+			name:         "no existing hazard nearby -> new row created",
+			hazardToSeed: nil,
+			incomingReport: hazards.Report{
+				EventTag: "pothole", Latitude: 33.6850, Longitude: 73.0490, ReportedBy: "vehicle-0427",
 			},
-			wantStatus: "created",
+			expectedStatus: "created",
 		},
 		{
-			name: "same tag ~6m away -> confirms existing hazard",
-			existingHazard: &existingHazard{
-				EventTag: "pothole", Lat: 33.6850, Lng: 73.0490, Confirmations: 3,
+			name: "same tag about 6 meters away -> confirms existing hazard",
+			hazardToSeed: &seededHazard{
+				EventTag: "pothole", Latitude: 33.6850, Longitude: 73.0490, Confirmations: 3,
 			},
-			incoming: hazards.Report{
-				EventTag: "pothole", Lat: 33.68505, Lng: 73.04905, ReportedBy: "veh-0311",
+			incomingReport: hazards.Report{
+				EventTag: "pothole", Latitude: 33.68505, Longitude: 73.04905, ReportedBy: "vehicle-0311",
 			},
-			wantStatus:       "confirmed",
-			wantConfirmCount: 4,
+			expectedStatus:        "confirmed",
+			expectedConfirmations: 4,
 		},
 		{
 			name: "same coordinates, different event_tag -> treated as a new hazard",
-			existingHazard: &existingHazard{
-				EventTag: "checkpost", Lat: 33.6850, Lng: 73.0490, Confirmations: 2,
+			hazardToSeed: &seededHazard{
+				EventTag: "checkpost", Latitude: 33.6850, Longitude: 73.0490, Confirmations: 2,
 			},
-			incoming: hazards.Report{
-				EventTag: "pothole", Lat: 33.6850, Lng: 73.0490, ReportedBy: "veh-0311",
+			incomingReport: hazards.Report{
+				EventTag: "pothole", Latitude: 33.6850, Longitude: 73.0490, ReportedBy: "vehicle-0311",
 			},
-			wantStatus: "created",
+			expectedStatus: "created",
 		},
 		{
-			name: "same tag but ~145m away (outside 100m dedup radius) -> new row",
-			existingHazard: &existingHazard{
-				EventTag: "pothole", Lat: 33.6850, Lng: 73.0490, Confirmations: 1,
+			name: "same tag but about 145 meters away (outside the 100 meter deduplication radius) -> new row",
+			hazardToSeed: &seededHazard{
+				EventTag: "pothole", Latitude: 33.6850, Longitude: 73.0490, Confirmations: 1,
 			},
-			incoming: hazards.Report{
-				EventTag: "pothole", Lat: 33.6863, Lng: 73.0490, ReportedBy: "veh-0311",
+			incomingReport: hazards.Report{
+				EventTag: "pothole", Latitude: 33.6863, Longitude: 73.0490, ReportedBy: "vehicle-0311",
 			},
-			wantStatus: "created",
+			expectedStatus: "created",
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tx := testdb.NewTransaction(t)
+	for _, testCase := range testCases {
+		test.Run(testCase.name, func(test *testing.T) {
+			transaction := testdatabase.NewTransaction(test)
 
-			if tt.existingHazard != nil {
-				seedHazard(t, tx, *tt.existingHazard)
+			if testCase.hazardToSeed != nil {
+				seedHazard(test, transaction, *testCase.hazardToSeed)
 			}
 
-			outcome, err := hazards.ProcessReport(tx, tt.incoming)
-			require.NoError(t, err)
-			require.Equal(t, tt.wantStatus, outcome.Status)
+			outcome, err := hazards.ProcessReport(transaction, testCase.incomingReport)
+			require.NoError(test, err)
+			require.Equal(test, testCase.expectedStatus, outcome.Status)
 
-			if tt.wantStatus == "confirmed" {
-				require.Equal(t, tt.wantConfirmCount, outcome.Confirmations)
+			if testCase.expectedStatus == "confirmed" {
+				require.Equal(test, testCase.expectedConfirmations, outcome.Confirmations)
 			}
 		})
 	}
@@ -83,21 +84,23 @@ func TestProcessReport(t *testing.T) {
 
 // --- test fixtures ---
 
-type existingHazard struct {
-	EventTag      string
-	Lat, Lng      float64
-	Confirmations int
+type seededHazard struct {
+	EventTag            string
+	Latitude, Longitude float64
+	Confirmations       int
 }
 
 // seedHazard inserts a hazard row directly (bypassing ProcessReport) so each
 // test case can set up its "existing state" independently of the code under
 // test.
-func seedHazard(t *testing.T, tx interface {
-	Exec(query string, args ...any) (any, error)
-}, h existingHazard) {
-	t.Helper()
-	// TODO: implement:
+//
+// Like seedDevice, it must use the same *sql.Tx that ProcessReport receives:
+// the seeded hazard is uncommitted, so only that transaction can see it.
+func seedHazard(test *testing.T, transaction *sql.Tx, hazard seededHazard) {
+	test.Helper()
+	// TODO(C-102): implement:
 	//   INSERT INTO hazards (event_tag, location, reported_by, confirmations, expires_at)
 	//   VALUES ($1, ST_MakePoint($2, $3)::geography, 'seed-fixture', $4, now() + interval '1 day')
-	t.Skip("seedHazard not implemented yet — fill in alongside hazards.ProcessReport")
+	//   with $2 = Longitude, $3 = Latitude (PostGIS points are longitude first).
+	test.Skip("seedHazard not implemented yet — fill in alongside hazards.ProcessReport")
 }

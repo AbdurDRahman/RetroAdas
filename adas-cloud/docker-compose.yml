@@ -1,0 +1,43 @@
+# Local development stack (Stage 1). Start the database with:
+#   docker compose up -d database
+services:
+  database:
+    # Pinned on purpose: Postgres 17 + PostGIS 3.5. The Azure VM (Stage 2) and
+    # the database VM (Stage 3) must run this same version, so geography math
+    # behaves identically everywhere.
+    image: postgis/postgis:17-3.5
+    # Log every SQL statement, so `docker compose logs -f database` shows exactly what
+    # the server and the tests send. Development only: too noisy for Stage 2/3.
+    command: postgres -c log_statement=all
+    environment:
+      # Must match DATABASE_URL in .env.example. POSTGRES_DB is created
+      # automatically; adas_test is created by the init script below.
+      POSTGRES_USER: adas_user
+      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: adas_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      # Named volume: data survives `docker compose down` and restarts.
+      # `docker compose down -v` deletes it (and re-runs the init scripts next start).
+      - database_data:/var/lib/postgresql/data
+      # Scripts in /docker-entrypoint-initdb.d run ONCE, only when database_data
+      # is empty, in file-name order. We mount a single file (not the folder) so
+      # the image's own 10_postgis.sh stays visible and runs before ours.
+      - ./database/init/20_create_test_database_and_migrate.sh:/docker-entrypoint-initdb.d/20_create_test_database_and_migrate.sh:ro
+      # Mounted so the init script can apply the migration files.
+      - ./database/migrations:/migrations:ro
+    healthcheck:
+      # Lets `docker compose up --wait` (and later the api service) know when
+      # Postgres actually accepts connections, not just when the container started.
+      # -h 127.0.0.1 (TCP) matters: during first-start initialisation the image
+      # runs a TEMPORARY server that listens only on a Unix socket while the init
+      # scripts run. Checking over TCP means "healthy" only after init finished
+      # and the real server is up, so adas_test is guaranteed to exist.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U adas_user -d adas_dev"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  database_data:

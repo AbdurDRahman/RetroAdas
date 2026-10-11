@@ -1,1 +1,8 @@
 *:Zone.Identifier
+
+# Claude Code files — kept local, never shared on GitHub.
+# (Files that were already committed, e.g. in adas-automatic-crash-detection/,
+# stay tracked: .gitignore only affects files git isn't tracking yet.)
+CLAUDE.md
+handover.md
+.claude/
