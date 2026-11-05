@@ -1,6 +1,6 @@
 // Simulates one "virtual device" driving and polling GET /v1/hazards the
-// way a real Jetson unit / mobile app would. Query parameter names follow
-// docs/design.md section 12.
+// way a real Jetson unit / mobile app would. The request follows
+// docs/design.md section 8 (no radius: the server computes it from speed).
 //
 // Still the old fixed model (a step of about 300 meters per poll, one poll per
 // second); C-113 switches it to the speed-based polling rule in
@@ -29,7 +29,6 @@ let latitude = 33.6844;
 let longitude = 73.0479;
 const HEADING_DEGREES = 142.0;
 const SPEED_KILOMETERS_PER_HOUR = 38.0;
-const RADIUS_METERS = 1000;
 
 // One degree of latitude is about 111 kilometers, so 0.0027 degrees is about 300 meters.
 const LATITUDE_STEP_DEGREES = 0.0027;
@@ -45,8 +44,7 @@ export default function () {
   const url = `${BASE_URL}/v1/hazards`
     + `?latitude=${latitude}&longitude=${longitude}`
     + `&heading_degrees=${HEADING_DEGREES}`
-    + `&speed_kilometers_per_hour=${SPEED_KILOMETERS_PER_HOUR}`
-    + `&radius_meters=${RADIUS_METERS}`;
+    + `&speed_kilometers_per_hour=${SPEED_KILOMETERS_PER_HOUR}`;
   const response = http.get(url, requestOptions);
 
   check(response, {

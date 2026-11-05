@@ -1,3 +1,6 @@
+> **Superseded.** This early draft is kept only for history. The agreed backend design is
+> [`docs/design.md`](docs/design.md) (task C-001); names, endpoints and tables here are outdated.
+
 # Digital Driving Assistant — API Design
 **Subsystem 3 (Cloud Infrastructure) — MVP scope**
 

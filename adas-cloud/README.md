@@ -4,7 +4,7 @@ Cloud backend for RetroADAS's crowdsourced hazard awareness (Feature 2): a
 stateless Go API over Postgres + PostGIS. Devices post the hazards they
 detect, the server deduplicates them, and devices pull the hazards ahead of
 where they're driving. The design is in `docs/design.md`; work is tracked in
-`TASKS.md` / `DONE.md` (see `CLAUDE.md` for the workflow).
+`TASKS.md` / `DONE.md` (see "How work is organized" below).
 
 ## Why the folders are named the way they are
 
@@ -106,6 +106,25 @@ docker compose down -v                                  # stop AND delete all da
 migration, either reset with `docker compose down -v` (deletes all data) or
 apply it by hand with `psql -f`. Task C-005 replaces this with a proper
 migration runner.
+
+## How work is organized
+
+Every piece of work is one task from `TASKS.md`, taken through five steps:
+
+1. **Pick** — choose the next unblocked task in the current stage (check its
+   **Depends on**).
+2. **Discuss** — settle the approach and the task's **Discuss** items before
+   writing any code, starting from the section of `docs/design.md` it touches.
+3. **Code** — test first, then the implementation.
+4. **Verify** — `go test ./...`, plus curl or k6 when the task touches HTTP or
+   load.
+5. **Close** — remove the task from `TASKS.md`, add an entry to the top of
+   `DONE.md` with the decisions made, add any newly discovered work to
+   `TASKS.md` as new tasks, and commit.
+
+The work runs in stages: 0 Foundations → 1 Laptop (docker compose) →
+2 Single Azure VM → 3 Multi-server Kubernetes. `docs/design.md` is the agreed
+backend design; changing one of its decisions is a task of its own.
 
 ## Current state
 
