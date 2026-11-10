@@ -31,26 +31,34 @@ All Stage 0 tasks are done (see `DONE.md`).
 ## Stage 1 — Laptop (core API, all features, docker compose)
 
 ### C-102 Deduplication on write (`ProcessReport`)
-- **Goal:** the core business logic — a re-report within the tag's deduplication radius of a live hazard with the same tag confirms it instead of inserting a duplicate.
-- **Done when:** the event-tag registry from `docs/design.md` section 4 exists in Go (`internal/hazards/event_tags.go`, replacing the hard-coded `timeToLiveFor` and `deduplicationRadiusMeters`); `hazards.ProcessReport` and `seedHazard` are implemented; the `test.Skip` line at the top of `TestProcessReport` is removed and all its cases pass; new tests cover:
+- **Goal:** the core business logic — a report either creates a hazard or confirms the one that already exists, never a duplicate.
+- **Done when:** `hazards.ProcessReport` and `seedHazard` are implemented; the `test.Skip` line at the top of `TestProcessReport` is removed and all its cases pass; tests cover:
+  - no live hazard of that tag inside its radius → `created`, `confirmations` = 1, the reporter gets a `hazard_confirmations` row;
+  - a match from another device → `confirmed`, `confirmations` + 1, expiry reset to now + the tag's time to live;
+  - a match from a device that already reported or confirmed it → `already_reported`, nothing changes;
   - expired hazards are never matched;
-  - time to live (TTL) resets on confirmation;
-  - **the same device re-reporting a hazard does not add a confirmation or reset its expiry** (bug found reviewing the drafts — each device counts once per hazard, e.g. a `hazard_confirmations(hazard_id, device_id)` table);
-  - when two live hazards of the same tag are inside the deduplication radius, the **nearest** one is matched (the drafts' `LIMIT 1` has no `ORDER BY`);
-  - two simultaneous reports of the same hazard give 1 row + 1 confirmation, not 2 rows;
-  - the `source` column and the `source`/`confidence` check constraint (`manual` ⇔ `confidence` is null) are in place;
-  - schema matches `docs/design.md` section 9: `hazards.id` is `GENERATED ALWAYS AS IDENTITY`, `confirmations` starts at 1, `confidence` is nullable, and the original reporter gets a `hazard_confirmations` row together with the hazard.
-- **Touches:** `internal/hazards/deduplication*.go`, `internal/hazards/event_tags.go`, new migrations for confirmations and for `source` + the check constraint.
-- **Depends on:** C-001, C-101 (fixture style), C-004
-- **Discuss:** whether to split this task in three (registry + schema changes; deduplication with one confirmation per device; the simultaneous-reports race) — it is large for one task. The race between SELECT and INSERT — `pg_advisory_xact_lock` on (tag, grid cell), `SERIALIZABLE` + retry, or accept the rare duplicate? Time to live and deduplication radius come from the Go registry and are passed to the query as parameters.
+  - with several candidates, the **nearest** one is matched;
+  - **direction:** for a tag where direction matters, a report whose heading differs from the hazard's by more than 135° is a new hazard; when either heading is missing, or the tag doesn't use direction, only location counts;
+  - unknown tag and tag not allowed for the device type are refused (the handler maps them to `400` / `403` in C-105).
+- **Touches:** `internal/hazards/deduplication*.go`.
+- **Depends on:** C-115
+- **Discuss:** whether `ProcessReport` itself refuses unknown and disallowed tags (so no caller can bypass the rule) or leaves that to the handler; how the heading difference is computed in SQL.
+- **Who:** tbd
+
+### C-116 Simultaneous reports
+- **Goal:** two devices reporting the same hazard at the same instant give 1 hazard with 2 confirmations, not 2 hazards. (Split out of C-102.)
+- **Done when:** a test runs several reports of one hazard at the same moment, each in its own committed transaction, and finds exactly 1 row with `confirmations` equal to the number of devices.
+- **Touches:** `internal/hazards/deduplication*.go`.
+- **Depends on:** C-102
+- **Discuss:** the race between looking for a match and inserting — a Postgres advisory lock held for the transaction (per tag, or per tag and map cell), `SERIALIZABLE` with retries, or accept the rare duplicate.
 - **Who:** tbd
 
 ### C-103 Projected lookahead search (`FindNearby`)
 - **Goal:** return the live hazards ahead of the vehicle, using the agreed speed-based rule: `search_radius = lookahead_distance = poll_distance = speed × time_between_polls` (minimum lookahead distance, maximum search radius of 1 kilometre — see `docs/design.md`).
 - **Done when:** `hazards.FindNearby` is implemented; the server computes lookahead distance and search radius from `speed_kilometers_per_hour` (`SearchQuery.RadiusMeters` and the fixed `LookaheadDistanceMeters` are removed — the client never sends a radius); the response matches `docs/design.md` section 8 (`distance_meters` from the vehicle's current position, nearest first, at most 100, plus `next_poll`); `TestFindNearby` has real cases (hazard inside the search circle returned; hazard behind the car not returned; hazard outside the radius not returned; expired hazard not returned; results ordered by distance; slow speed uses the minimum lookahead distance).
 - **Touches:** `internal/hazards/nearby_search*.go`, `config/` (time between polls, minimum lookahead distance, maximum search radius).
-- **Depends on:** C-001, C-102
-- **Discuss:** how to test "hazard behind the car" reliably near the minimum lookahead distance. (Result limit and no client radius decided in C-001.)
+- **Depends on:** C-102
+- **Discuss:** **direction filter** — since C-102 a tag where direction matters can have one hazard per direction at the same spot, so the search should return only hazards whose heading is within 135° of the vehicle's (hazards without a heading, and tags that don't use direction, go to everyone); otherwise a driver gets two warnings for one pothole. How to test "hazard behind the car" reliably near the minimum lookahead distance. (Result limit and no client radius decided in C-001.)
 - **Who:** tbd
 
 ### C-104 Handshake

@@ -72,26 +72,30 @@ So each `event_tag` has a server-side policy entry:
 | `time_to_live` | How long a hazard stays live after its last confirmation. |
 | `deduplication_radius_meters` | How close a new report must be to count as the same hazard. |
 | `allowed_device_types` | Which `device_type`s may post this tag (e.g. only `mobile_app` for `checkpost`). |
+| `direction_matters` | Whether a report from oncoming traffic counts as a different hazard (section 6). |
 
 **Starting values:**
 
-| `event_tag` | Time to live | Deduplication radius | Allowed device types |
-|---|---|---|---|
-| `accident` | 90 minutes | 150 meters | `jetson_unit`, `mobile_app` |
-| `pothole` | 14 days | 25 meters | `jetson_unit`, `mobile_app` |
-| `checkpost` | 4 hours | 100 meters | `mobile_app` |
-| `debris` | 1 day | 50 meters | `mobile_app` |
+| `event_tag` | Time to live | Deduplication radius | Allowed device types | Direction matters |
+|---|---|---|---|---|
+| `accident` | 90 minutes | 150 meters | `jetson_unit`, `mobile_app` | no |
+| `pothole` | 14 days | 25 meters | `jetson_unit`, `mobile_app` | yes |
+| `checkpost` | 4 hours | 100 meters | `mobile_app` | no |
+| `debris` | 1 day | 50 meters | `mobile_app` | yes |
 
 - **Time to live** counts from the last confirmation, so a hazard that keeps being reported
   stays live, and disappears one time to live after the last report.
 - **Deduplication radius** follows how much road the hazard covers, plus GPS error (a phone is
   off by about 5–10 meters). Too large merges two separate hazards; too small shows one hazard
   twice.
+- **Direction matters** for hazards that sit on one side of the road (a pothole, debris). An
+  accident or a checkpost usually affects both directions, so a report from either side is the
+  same hazard.
 - **Allowed device types:** only a person can recognize a checkpost or debris today. When the
   camera pipeline arrives, `jetson_unit` is added to those rows — no other change.
 
 **Where the registry lives: in Go code, not in the database.** A single file
-(e.g. `internal/hazards/event_tags.go`) holds the table above. The API is the only writer of
+(`internal/hazards/event_tags.go`) holds the table above. The API is the only writer of
 hazards, so the handler is the gatekeeper:
 - unknown `event_tag` → `400 Bad Request`;
 - `event_tag` not allowed for the device's `device_type` → `403 Forbidden`.
@@ -188,6 +192,15 @@ lookahead distance is expected to cover it.
 - **Deduplication on write.** A new report of the same `event_tag` within that tag's
   deduplication radius of a live (not yet expired) hazard confirms it instead of creating a new
   hazard. If several match, the **nearest** one is confirmed.
+- **Direction.** The two sides of a divided road are often 10 to 20 meters apart — inside a
+  pothole's radius — so location alone would merge two different hazards. For a tag where
+  direction matters (section 4), a report whose heading differs from the hazard's stored
+  heading by **more than 135°** is a different hazard. Oncoming traffic differs by about 180°,
+  and a phone compass can be off by 20 to 30°, so 135° leaves a margin on both sides; a car
+  joining from a side road (about 90°) still matches. When the report or the hazard has no
+  heading, only location counts. Consequence: on an undivided road one pothole can be stored
+  once per direction, so the search should return a driver only their own direction's hazards
+  (decided in C-103).
 - **A confirmation is from an independent device.** Each device counts at most once per hazard.
   A device re-reporting a hazard it already reported or confirmed changes nothing: no extra
   confirmation and no expiry reset. (Bug found in the drafts; fixed in C-102.)
@@ -518,11 +531,11 @@ C-111; a `score` field can be added later without breaking clients. Errors: `401
 
 Which tables exist and why; exact columns and SQL are designed in each task.
 
-| Table | Holds | Changes from today's migrations |
+| Table | Holds | Status |
 |---|---|---|
 | `devices` | `device_id` (e.g. `jetson-4f9c2a1b`), the HMAC hash of the API key, `device_type`, `created_at`, `revoked` | Exists (migration 001), with a check that `device_type` is `jetson_unit` or `mobile_app`. |
-| `hazards` | One row per real-world hazard: `event_tag`, `location`, optional `heading_degrees`, `confidence` (null for manual), `source`, `reported_by`, `confirmations`, `created_at`, `expires_at` | Exists (migration 002). Add `source` and the checks (`source`/`confidence` pairing from section 4, heading from 0 up to 360). `confidence` becomes nullable; `confirmations` starts at 1 (section 6). `id` switches from `BIGSERIAL` to `GENERATED ALWAYS AS IDENTITY`. Unknown tags are rejected by the handler, not the database. |
-| `hazard_confirmations` | One row per (hazard, device) pair, with the time | New (C-102). |
+| `hazards` | One row per real-world hazard: `event_tag`, `location`, optional `heading_degrees`, `confidence` (null for manual), `source`, `reported_by`, `confirmations`, `created_at`, `expires_at` | Exists (migration 002), with checks for the `source`/`confidence` pairing (section 4), the heading (from 0 up to 360) and `confirmations` (at least 1, starting at 1). `reported_by` must be an existing device. Unknown tags are rejected by the Go registry, not the database. |
+| `hazard_confirmations` | One row per (hazard, device) pair, with the time | Exists (migration 003). Both columns must point to existing rows. |
 | Report rate-limit counter | Reports per device per time window | New (C-110, section 10). |
 
 **`hazards.id`** is generated by Postgres from an identity sequence: the insert never sets it
@@ -544,6 +557,10 @@ and slower index inserts for no security gain. `GENERATED ALWAYS AS IDENTITY` is
   `GET /v1/hazards` returns it on every poll, and reading a column is far cheaper than counting
   rows. Both are updated in the same transaction (C-102).
 - It also feeds the contribution counts (section 8).
+
+**Device links.** `hazards.reported_by` and `hazard_confirmations.device_id` are foreign keys
+to `devices`, so a hazard can never name a device that doesn't exist. Devices are revoked,
+never deleted, so the link never blocks anything.
 
 **Deliberately not stored:** an `event_tags` table (the registry is Go code, section 4); poll
 locations (privacy, section 7); the archive of expired hazards (later, C-307).
@@ -664,6 +681,7 @@ been deployed, so no follow-up migration is needed; local databases are reset wi
 | Speed-based polling: `search_radius = lookahead_distance = poll_distance = speed × time_between_polls`, with a minimum, a maximum and a fallback timer | Section 5 |
 | Polling numbers are configuration, not architecture | Section 5 |
 | Each device confirms a hazard at most once; nearest match wins | Section 6 |
+| Per-tag "direction matters": a report more than 135° off the hazard's heading is a different hazard (pothole, debris: yes; accident, checkpost: no); no heading → location only (user's call, C-115) | Sections 4 and 6 |
 | Expired hazards are kept; moved to a separate archive store at the end of the project, not deleted | Section 6 |
 | A revoked device's existing hazards stay until they expire | Section 6 |
 | `confirmations` counts reporting devices, the first reporter included; a repeat is recognized by location first, then by `hazard_confirmations` | Section 6 |
@@ -683,6 +701,7 @@ been deployed, so no follow-up migration is needed; local databases are reset wi
 | One error shape with machine-readable `code` values | Section 8 |
 | Tables: `devices`, `hazards`, `hazard_confirmations` (reporter included, primary key `(hazard_id, device_id)`), a report rate-limit counter | Section 9 |
 | `hazards.id` generated by Postgres (`GENERATED ALWAYS AS IDENTITY`); `confirmations` kept as a column alongside `hazard_confirmations` | Section 9 |
+| `hazards.reported_by` and `hazard_confirmations.device_id` are foreign keys to `devices` (C-115) | Section 9 |
 | Schema changes through goose migrations: one transaction per file, advisory lock, forward only, run before the server (C-005) | Section 9 |
 | Rate limits in two shared layers: per IP address at the proxy / ingress, per device in the database for reports | Section 10 |
 | Sharing-time indicator split into server latency + polling staleness | Section 11 |

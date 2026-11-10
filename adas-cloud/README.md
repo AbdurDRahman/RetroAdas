@@ -32,6 +32,7 @@ adas-cloud/
 │   ├── devices/              Everything about authenticating a device_id +
 │   │                         API key against the devices table.
 │   ├── hazards/
+│   │   ├── event_tags.go     The per-tag rules (time to live, radius, ...).
 │   │   ├── deduplication.go  POST /v1/hazards logic: match-or-insert.
 │   │   └── nearby_search.go  GET /v1/hazards logic: projected lookahead search.
 │   └── handshake/            POST /v1/devices/handshake logic.

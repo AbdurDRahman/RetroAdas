@@ -19,6 +19,11 @@ Entry template:
 
 ---
 
+### C-115 Event-tag registry and hazard schema — 2026-11-10 — `4ff33d3`, `630636b`, `f1a7b55`
+- **Changed:** the tag registry in `internal/hazards/event_tags.go`; `hazards` gains `source`, its checks and identity ids (migration 002, edited in place); new `hazard_confirmations` table (migration 003). C-102 was split into C-115, C-102 and C-116.
+- **Decided:** design sections 4, 6 and 9 — including the direction rule (user's call) and the device foreign keys. Also: a `CHECK` lets "unknown" through, so a rule about an optional column must say `IS NOT NULL` itself; table tests start from a valid row and change one thing.
+- **Follow-ups:** — (C-103 gained the direction-filter question)
+
 ### C-101 Device authentication — 2026-11-10 — `b8aac77`, `d177efe`, `26e266e`
 - **Changed:** `devices.HashAPIKey` and `devices.Authenticate` (one lookup, one path, returns the device type); `API_KEY_PEPPER` in `config.Load`, plus `config.LoadDatabaseURL` for `cmd/migrate`; a `device_type` check in migration 001.
 - **Decided:** design section 7. Also: the pepper is passed to `Authenticate` as a parameter, so tests use a fixed test pepper and need no environment variable; the timing rule is kept by the shape of the code (a fake hash for unknown devices), not by a timing test; Argon2id was considered and rejected for the same reasons as bcrypt (it would be the right choice for user passwords).
