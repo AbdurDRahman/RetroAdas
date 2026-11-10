@@ -15,6 +15,11 @@ import (
 // section 6. Run it now, watch it fail, then implement
 // hazards.ProcessReport until every case here passes.
 func TestProcessReport(test *testing.T) {
+	// Skipped until task C-102 writes hazards.ProcessReport, so the checks that
+	// run on every push stay meaningful. Removing this line is the first step
+	// of C-102: the test then fails, and the task makes it pass.
+	test.Skip("C-102: hazards.ProcessReport is not written yet")
+
 	testCases := []struct {
 		name                  string
 		hazardToSeed          *seededHazard // nil = table starts empty

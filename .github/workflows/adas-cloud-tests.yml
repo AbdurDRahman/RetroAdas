@@ -1,0 +1,77 @@
+# Runs the adas-cloud checks on GitHub for every push and pull request that
+# touches adas-cloud/ (task C-206). The steps are the same commands used on the
+# laptop, against the same pinned PostGIS image as docker-compose.yml.
+name: adas-cloud tests
+
+on:
+  push:
+    paths:
+      - "adas-cloud/**"
+      - ".github/workflows/adas-cloud-tests.yml"
+  pull_request:
+    paths:
+      - "adas-cloud/**"
+      - ".github/workflows/adas-cloud-tests.yml"
+
+# The job only reads the repository; it never needs to write to it.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: adas-cloud
+
+    services:
+      database:
+        # Must stay the same image as in adas-cloud/docker-compose.yml.
+        image: postgis/postgis:17-3.5
+        env:
+          POSTGRES_USER: adas_user
+          # Not a secret: this database exists only for the minutes the job runs.
+          POSTGRES_PASSWORD: changeme
+          # The tests migrate adas_test themselves (task C-005), so an empty
+          # database is all they need.
+          POSTGRES_DB: adas_test
+        ports:
+          - 5432:5432
+        # Checked over TCP (-h 127.0.0.1): during first start the image runs a
+        # temporary server on a Unix socket only, and the job must wait for the
+        # real one.
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U adas_user -d adas_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+
+    env:
+      TEST_DATABASE_URL: postgres://adas_user:changeme@localhost:5432/adas_test?sslmode=disable
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          # The Go version comes from go.mod, so it is written in one place.
+          go-version-file: adas-cloud/go.mod
+          cache-dependency-path: adas-cloud/go.sum
+
+      - name: Check formatting
+        run: |
+          unformatted_files="$(gofmt -l .)"
+          if [ -n "$unformatted_files" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted_files"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./...

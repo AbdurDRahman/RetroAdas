@@ -30,9 +30,17 @@ All Stage 0 tasks are done (see `DONE.md`).
 
 ## Stage 1 — Laptop (core API, all features, docker compose)
 
+### C-206 Checks on every push (continuous integration)
+- **Goal:** every push to GitHub runs the real-database test suite. Moved up from Stage 2: it is cheap, and it catches "works only on my laptop" early.
+- **Done when:** the first run of `../.github/workflows/adas-cloud-tests.yml` is green on GitHub. The workflow is written and its steps were rehearsed locally against a fresh PostGIS container (formatting, `go vet`, build, `go test ./...`); only the first real run is left.
+- **Touches:** `../.github/workflows/adas-cloud-tests.yml`.
+- **Depends on:** C-003, C-005
+- **Discuss:** — (path filters: only pushes touching `adas-cloud/` or the workflow file trigger it)
+- **Who:** claude
+
 ### C-101 Device authentication
 - **Goal:** every write is authenticated as `device_id` + API key against `devices`, with only a hash stored.
-- **Done when:** `devices.Authenticate` and `seedDevice` are implemented as in `docs/design.md` section 7 — HMAC-SHA256 with the `API_KEY_PEPPER` pepper (read in `config/`, added to `.env.example`), constant-time comparison, a dummy hash for unknown devices, `401` for unknown device and wrong key alike, `403` for revoked; all 4 cases in `TestAuthenticate` pass; raw key never logged.
+- **Done when:** `devices.Authenticate` and `seedDevice` are implemented as in `docs/design.md` section 7 — HMAC-SHA256 with the `API_KEY_PEPPER` pepper (read in `config/`, added to `.env.example`), constant-time comparison, a dummy hash for unknown devices, `401` for unknown device and wrong key alike, `403` for revoked; the `test.Skip` line at the top of `TestAuthenticate` is removed and all 4 cases pass; raw key never logged.
 - **Touches:** `internal/devices/*`.
 - **Depends on:** C-003, C-004
 - **Discuss:** how to test the dummy-hash timing rule (or accept it as a code-review item). Hashing method decided in C-001: HMAC-SHA256 with a pepper, not bcrypt.
@@ -40,7 +48,7 @@ All Stage 0 tasks are done (see `DONE.md`).
 
 ### C-102 Deduplication on write (`ProcessReport`)
 - **Goal:** the core business logic — a re-report within the tag's deduplication radius of a live hazard with the same tag confirms it instead of inserting a duplicate.
-- **Done when:** the event-tag registry from `docs/design.md` section 4 exists in Go (`internal/hazards/event_tags.go`, replacing the hard-coded `timeToLiveFor` and `deduplicationRadiusMeters`); `hazards.ProcessReport` and `seedHazard` are implemented; all cases in `TestProcessReport` pass; new tests cover:
+- **Done when:** the event-tag registry from `docs/design.md` section 4 exists in Go (`internal/hazards/event_tags.go`, replacing the hard-coded `timeToLiveFor` and `deduplicationRadiusMeters`); `hazards.ProcessReport` and `seedHazard` are implemented; the `test.Skip` line at the top of `TestProcessReport` is removed and all its cases pass; new tests cover:
   - expired hazards are never matched;
   - time to live (TTL) resets on confirmation;
   - **the same device re-reporting a hazard does not add a confirmation or reset its expiry** (bug found reviewing the drafts — each device counts once per hazard, e.g. a `hazard_confirmations(hazard_id, device_id)` table);
@@ -183,14 +191,6 @@ All Stage 0 tasks are done (see `DONE.md`).
 - **Touches:** `deploy/vm/`, docs.
 - **Depends on:** C-203, C-005
 - **Discuss:** where backups go (VM disk vs Azure Blob).
-- **Who:** tbd
-
-### C-206 CI
-- **Goal:** every push runs the real-database test suite.
-- **Done when:** GitHub Actions workflow runs `go vet` + `go test ./...` with a `postgis/postgis` service container (same tag as C-003); optional: build image on main.
-- **Touches:** `../.github/workflows/adas-cloud.yml`.
-- **Depends on:** C-003
-- **Discuss:** monorepo path filters so crash-detection pushes don't trigger it.
 - **Who:** tbd
 
 ### C-207 k6 against the VM + sharing-time KPI
