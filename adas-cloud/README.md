@@ -110,16 +110,9 @@ docker compose down -v                                  # stop AND delete all da
 
 ### Migrations
 
-`database/migrations/` holds numbered `.sql` files. The migrate program
-(`cmd/migrate`, using the [goose](https://github.com/pressly/goose) library)
-applies the ones a database hasn't applied yet, in order, and records them in
-the `schema_migrations` table. Each file runs in one transaction with its
-record, so a failing file leaves no trace; a Postgres advisory lock makes two
-runs at the same time take turns.
-
-Where it runs: `go run ./cmd/migrate` by hand; the container entry point when
-`RUN_MIGRATIONS=true` (Stages 1 and 2); a one-off Kubernetes Job (Stage 3).
-Tests migrate `adas_test` themselves.
+`go run ./cmd/migrate` applies the `.sql` files in `database/migrations/` that
+a database hasn't applied yet. Tests migrate `adas_test` themselves. How it
+works and why is in `docs/design.md` section 9.
 
 To add a migration:
 
@@ -131,7 +124,7 @@ To add a migration:
 
 Until the first deploy to the Azure VM (Stage 2), an applied file may still be
 edited in place, followed by `docker compose down -v`. From Stage 2 on, never
-edit an applied file — goose would skip it and the databases would quietly
+edit an applied file: it would be skipped, and the databases would quietly
 differ from the file. Add a new one instead.
 
 ## How work is organized
@@ -151,11 +144,16 @@ Every piece of work is one task from `TASKS.md`, taken through five steps:
 
 The work runs in stages: 0 Foundations → 1 Laptop (docker compose) →
 2 Single Azure VM → 3 Multi-server Kubernetes. `docs/design.md` is the agreed
-backend design; changing one of its decisions is a task of its own.
+backend design and the one place where design facts are written; changing one
+of its decisions is a task of its own.
+
+Every push that touches `adas-cloud/` runs the checks in
+`../.github/workflows/adas-cloud-tests.yml` on GitHub: formatting, `go vet`,
+build, and the tests against a real PostGIS database.
 
 ## Current state
 
-Work is tracked task by task: `TASKS.md` (remaining), `DONE.md` (finished,
-with the decisions made), `docs/design.md` (the backend design). Every test
-currently either fails with "not implemented" or is `t.Skip`'d — that's the
-intended starting point for the TDD loop.
+Stage 0 (foundations) is done: the design is agreed, the database runs in
+Docker, and migrations work. No endpoint is implemented yet. The tests for
+unwritten features are skipped, each naming the task that will write it;
+`TASKS.md` lists what remains and `DONE.md` what is finished.

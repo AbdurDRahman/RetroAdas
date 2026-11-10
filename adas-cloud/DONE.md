@@ -1,145 +1,55 @@
 # DONE — completed cloud work
 
 Newest first. A task moves here from `TASKS.md` when it's closed (step 5 of the loop in
-"How work is organized" in `README.md`). The **Decisions made** section is the durable record
-of *why* — read the last few entries at the start of a session.
+"How work is organized" in `README.md`).
+
+Entries stay short. Design decisions are written in `docs/design.md` (decision log,
+section 13), so an entry only points there. **Decided** is for the things the design
+doesn't hold: how a tool is set up, what was rejected, what to remember next time. The
+full detail of a change is in its commit.
 
 Entry template:
 
 ```
-### C-xxx Title — YYYY-MM-DD
-- **Written by:** me | claude
-- **Commit(s):** <short sha> <message>
-- **What changed:**
-  - ...
-- **Decisions made:**
-  - ...
+### C-xxx Title — YYYY-MM-DD — <short sha>
+- **Changed:** one or two lines.
+- **Decided:** what `docs/design.md` doesn't already record (or "design section N").
 - **Follow-ups:** new task IDs added to TASKS.md (or —)
 ```
 
 ---
 
-### C-005 Migration runner — 2026-11-10
-- **Written by:** claude (via `/code-with-me`, each step reviewed by the user)
-- **Commit(s):** — (not committed yet)
-- **What changed:**
-  - `database/migrate.go`: `Migrate(cntx, connectionPool)` runs goose with the `.sql` files embedded in the binary, an advisory lock, and the record table `schema_migrations`; returns the names of the files it applied.
-  - `cmd/migrate/main.go`: the program that runs it and exits (exit code 1 on failure; Ctrl+C / SIGTERM cancels cleanly).
-  - `docker-entrypoint.sh`: `run_migrations` calls `/app/migrate` and refuses to start the server if it fails.
-  - `database/init/20_create_test_database_and_migrate.sh` → `20_create_test_database.sh`: only creates `adas_test`; `docker-compose.yml` no longer mounts the migrations folder.
-  - Tests: `testdatabase.NewTransaction` migrates `adas_test` once per test process; `testdatabase.NewEmptyDatabase` gives a test a throwaway empty database; `database/migrate_test.go` covers "everything once, then nothing" and "two runs at the same moment".
-  - Migrations 001 and 002 start with `-- +goose Up`. `go.mod`: goose v3.26.0 added; testify v1.9.0 → v1.11.0 (required by goose).
-- **Decisions made:**
-  - **goose, not our own runner and not golang-migrate** (user's call after pushing back on writing our own: an existing, proven library is preferred when it does the job). goose runs each file in one transaction together with its record, so a failing file leaves no trace; golang-migrate would leave a "dirty" flag to fix by hand. Scaling is not a differentiator: every option handles Stage 3 with a one-off Job plus a lock.
-  - **goose v3.26.0**, the newest release that supports Go 1.24 (v3.27+ needs Go 1.25+).
-  - **Record table named `schema_migrations`**, not goose's default `goose_db_version` (naming rule). Its row `0` is goose's own starting marker.
-  - **Lock retries every 1 second, for up to 5 minutes** (goose default: every 5 seconds).
-  - **Forward only:** no `-- +goose Down` sections; a change is undone by a new migration.
-  - **Editing applied files:** allowed until the first Stage 2 deploy (then `docker compose down -v`); never after. goose has no checksum, so this is a rule, not something the runner enforces.
-  - **One path for migrations:** the init script no longer applies them; tests migrate `adas_test` themselves. A new migration's name also goes into `expectedMigrationFileNames` in the test, on purpose.
-  - **The server never migrates on its own**; `migrate` runs before it (entry point in Stages 1–2, Kubernetes Job in Stage 3).
-- **Verified:** after `docker compose down -v` + `up`, `adas_dev` and `adas_test` exist with no tables; `go run ./cmd/migrate` applied 001 and 002, the second run printed "database already up to date"; `go test ./...`: `database` passes (both migration tests; the concurrent one takes ~1 s longer because one run waits for the lock), `adas_test` was migrated by the tests, no `adas_test_empty_*` databases left behind; `internal/devices` and `internal/hazards` still fail as planned (stubs for C-101 / C-102). Entry point checked locally with a built `migrate`: success starts the command, failure stops with exit 1. `go vet ./...` clean.
-- **Follow-ups:** none new; C-112 now also builds `/app/migrate`, and C-304's Job runs it.
+### C-005 Migration runner — 2026-11-10 — `ad4c921`
+- **Changed:** `database.Migrate` (goose, `.sql` files built into the program) and `cmd/migrate`; the entry point calls `/app/migrate`; the database init script only creates `adas_test`; tests migrate `adas_test` themselves.
+- **Decided:** design section 9. Also: goose v3.26.0 is the newest release that works with Go 1.24; a new migration's file name must be added to `expectedMigrationFileNames` in `database/migrate_test.go`; the migration tests need a database user that may create databases.
+- **Follow-ups:** — (C-112 builds `/app/migrate`; C-304's Job runs it)
 
-### C-001 Finalize the backend design — 2026-11-04
-- **Written by:** claude drafted each section, user reviewed and approved it
-- **Commit(s):** `30be8c6` C-001: agreed backend design (registry, identity, endpoints, data, abuse controls)
-- **What changed:**
-  - `docs/design.md`: every section agreed — event-tag registry (4), polling (5), hazard lifecycle (6), identity and security analysis (7), all endpoint request and response bodies (8), data entities (9), abuse controls (10); the decision log (13) sorted by section.
-  - `api_design.md`, `database_schema.md` marked superseded (kept for history).
-  - `../features/feature-2-crowdsourced-hazards.md` updated to match: speed-based polling, authentication on every request, per-tag time to live and deduplication radius, three tables, the new endpoints, the split key performance indicator, and answers to its open questions.
-  - `TASKS.md`: C-101 … C-114 rewritten against the agreed design; C-108 (deleting expired hazards) removed; C-307 is now "Archive expired hazards".
-  - k6 polling script no longer sends `radius_meters`; `.env.example` comments fixed.
-  - `README.md` gained a "How work is organized" section, and `TASKS.md` / `DONE.md` point to it instead of `CLAUDE.md`, which stays local and isn't on GitHub.
-- **Decisions made:**
-  - **Event-tag registry in Go code, not a database table** (user's call: less database complexity). The handler rejects unknown tags (`400`) and tags not allowed for the device type (`403`). Starting values: accident 90 minutes / 150 m, pothole 14 days / 25 m, checkpost 4 hours / 100 m, debris 1 day / 50 m. Field `allowed_sources` renamed `allowed_device_types`.
-  - **`confidence` is null for manual reports** (user's call, replacing a made-up default confidence), enforced by a check constraint; `source` is derived from the device type, never sent by the client.
-  - **Expired hazards are kept**, moved to a separate archive store at the end of the project (C-307); a revoked device's hazards stay until they expire (they are bounded by their time to live).
-  - **Identity:** per-device keys on every request, reads included; HMAC-SHA256 with a pepper (`API_KEY_PEPPER`), not bcrypt; the same `401` for unknown device and wrong key, plus a dummy hash; phones self-register. Approved after a written security analysis (section 7): fake identities through registration are the known weak point, accepted with limits; HTTPS mandatory beyond the laptop; never log coordinates with a device ID in Stages 2 and 3.
-  - **Endpoints:** the handshake is only an identity check; event-tag lists are hardcoded in the clients (user's call — a server-sent list rarely helps, since a new tag needs a client change anyway); polling values come only in `GET /v1/hazards` responses and the client never sends a radius; the map endpoint stays (the app needs it), with a bounding box and limits; one error shape.
-  - **`confirmations` counts reporting devices, the first included** (1 at creation). A repeat report is matched by location first, then checked in `hazard_confirmations` (primary key `(hazard_id, device_id)`, reporter included).
-  - **Clients report each hazard once** (tracker ID, or a distance-and-time memory) — raised by the user; the server check stays as the safety net. Frame counting rejected as fragile.
-  - `hazards.id` generated by Postgres, switching to `GENERATED ALWAYS AS IDENTITY` in C-102.
-  - Rate limits in two shared layers: per IP address at the proxy / ingress, per device in the database for reports.
-  - **Contradicts the feature spec** (spec updated, as agreed): fixed 300 m polling, authentication on writes only, handshake returning configuration, `radius_m` query parameter, 2-table schema.
-- **Verified:** no "To discuss" markers left in `docs/design.md`; no code comment cites the old drafts; the k6 polling script passes a syntax check (Node — Docker Desktop was off, so `k6 inspect` couldn't run). No Go code changed.
+### C-001 Finalize the backend design — 2026-11-04 — `30be8c6`
+- **Changed:** `docs/design.md` agreed section by section; the feature spec, `TASKS.md` (C-101 … C-114) and the k6 polling script brought in line; the two early drafts marked superseded; C-108 (deleting expired hazards) removed.
+- **Decided:** everything is in the design's decision log (section 13).
 - **Follow-ups:** the Jetson detection code needs the "report each hazard once" rule (outside `adas-cloud`; pass it to whoever owns it).
 
-### C-006 Refactor the codebase to the naming rules — 2026-10-11
-- **Written by:** claude (via /code-with-me)
-- **Commit(s):** `376fdb0` adas-cloud: workflow files, Docker database, naming refactor (C-000, C-002, C-003, C-004, C-006)
-- **What changed:**
-  - Go: every abbreviated identifier spelled out (`tx` → `transaction`, `cfg` → `configuration`, `db` → `connectionPool`, `mux` → `router`, `AuthResult` → `AuthenticationResult`, `ttlFor` → `timeToLiveFor`, `Lat`/`Lng` → `Latitude`/`Longitude`, `RadiusM` → `RadiusMeters`, …); tests use `test`, `testCases`/`testCase`, `expected…`/`actual…`; fixture types `seededDevice` / `seededHazard`.
-  - `database/testing` → `database/testdatabase` (file `transaction.go`), so tests import it without the `testdb` alias.
-  - JSON fields and query parameters renamed (`latitude`, `longitude`, `heading_degrees`, `speed_kilometers_per_hour`, `radius_meters`, `distance_meters`, `poll_distance_meters`, `lookahead_distance_meters`, `search_radius_meters`).
-  - Migration 002 edited in place: `heading_deg` → `heading_degrees`, indexes `*_idx` → `hazards_location_index` / `hazards_expires_at_index` / `hazards_event_tag_index`; local database rebuilt.
-  - k6 scripts: new JSON / query names and full-word variables; `veh-` → `vehicle-` test IDs everywhere.
-  - `docker-entrypoint.sh`: `i` → `attempt_number`, `WAIT_FOR_DB` → `WAIT_FOR_DATABASE`, `DB_WAIT_RETRIES` → `DATABASE_WAIT_RETRIES`.
-  - Docker Compose service `db` → `database` (commands are now `docker compose … database`).
-  - Comments point at `docs/design.md` instead of the old drafts; TODOs tagged with their task (`TODO(C-101)` …); `gofmt` clean for the whole project; README folder tree and `CLAUDE.md` brought up to date.
-- **Decisions made:**
-  - Only `ID`, `URL`, `API`, `HTTP`, `JSON`, `SQL` stay short; units are spelled out in names.
-  - Go specifics: `err`, `test *testing.T`, `cntx`; a variable never shares a name with a package.
-  - **JSON fields and database columns were renamed too** — a design change, made now because nothing is built on them yet. Recorded in `docs/design.md` section 12; the early drafts keep the old names.
-  - Migrations edited in place instead of adding a rename migration, since nothing is deployed.
-  - Full naming rules written into `CLAUDE.md`.
-- **Also fixed (bug in C-003):** the database health check used the Unix socket, so it reported "healthy" while the image's *temporary* init server was running — before `adas_test` existed. It now checks over TCP (`pg_isready -h 127.0.0.1`), which only succeeds once initialisation is complete. Verified by querying immediately after `up --wait` on a fresh volume.
-- **Verified:** `go build`, `go vet`, `gofmt -l` clean; `go test ./...` gives the same red bar as before (1 fail + 3 skips per table test, `TestFindNearby` skips); server starts and connects; entrypoint database-wait loop works against the real database; both k6 scripts parse (`k6 inspect`); renamed column and indexes present in both databases.
-- **Follow-ups:** C-106 gained connection reuse (keep-alive / HTTP/2) and gzip responses.
+### C-006 Refactor the codebase to the naming rules — 2026-10-11 — `376fdb0`
+- **Changed:** every abbreviated name spelled out across Go, JSON fields, query parameters, database columns and indexes, environment variables, scripts and test data; `database/testing` → `database/testdatabase`; compose service `db` → `database`.
+- **Decided:** design section 12. Also fixed a C-003 bug: the database health check now uses TCP (`pg_isready -h 127.0.0.1`), because over the Unix socket it reported "healthy" while the image's temporary start-up server was still running.
+- **Follow-ups:** C-106 gained connection reuse and gzip responses.
 
-### C-003 Local Postgres+PostGIS in Docker — 2026-10-11
-- **Written by:** claude (via /code-with-me)
-- **Commit(s):** `376fdb0` adas-cloud: workflow files, Docker database, naming refactor (C-000, C-002, C-003, C-004, C-006)
-- **What changed:**
-  - `docker-compose.yml`: `db` service on `postgis/postgis:17-3.5`, named volume `database_data`, `pg_isready` health check, every SQL statement logged (`log_statement=all`).
-  - `database/init/20_create_test_database_and_migrate.sh`: on first start, creates `adas_test` and applies `database/migrations/*.sql` to `adas_dev` and `adas_test` (`ON_ERROR_STOP`, `set -euo pipefail`).
-  - `adas-cloud/.gitignore`: `.env` and variants ignored (`.env.example` kept), top-level build binaries, coverage files.
-  - `README.md` setup section and `CLAUDE.md` commands rewritten for the Docker flow.
-- **Decisions made:**
-  - Pinned Postgres 17.5 + PostGIS 3.5.2. Stages 2 and 3 must run the same version.
-  - The init script is mounted as a **single file** named `20_...`, so the image's own `10_postgis.sh` stays visible and runs first (mounting the whole folder would have hidden it).
-  - Statement logging on for development, to make debugging and following the tests easier. Not for Stage 2/3.
-  - **`.env` is loaded by the shell** (`set -a; source .env; set +a`), not by the program (`godotenv` rejected: `go test` runs from each package's folder so it wouldn't find `.env`, and it adds laptop-only code). The program only ever reads plain environment variables, the same as on the VM and in Kubernetes. `direnv` is an optional convenience later.
-  - `.env` was not ignored by git before this task, so nothing gets committed until `.gitignore` covers it.
-- **Verified:** container healthy; both databases have `devices`, `hazards` and PostGIS 3.5.2; following the README in a clean shell, `go test ./...` reaches the database and fails only with "not implemented" / skips; the statement log shows each test's `BEGIN` … `ROLLBACK`.
-- **Follow-ups:** known limitation (new migrations need `down -v` or manual `psql -f`) is resolved by C-005, which is now unblocked.
-
-### C-004 Make the test suite compile (red, not broken) — 2026-10-11
-- **Written by:** claude (via /code-with-me)
-- **Commit(s):** `376fdb0` adas-cloud: workflow files, Docker database, naming refactor (C-000, C-002, C-003, C-004, C-006)
-- **What changed:**
-  - `seedDevice` (`internal/devices/authentication_test.go`) and `seedHazard` (`internal/hazards/deduplication_test.go`) now take `*sql.Tx` instead of an inline interface that `*sql.Tx` couldn't satisfy (its `Exec` returns `sql.Result`, not `any`).
-  - Comments explain why the fixture must share the test's transaction: seeded rows are uncommitted, so only that transaction can see them.
-- **Decisions made:**
-  - Concrete `*sql.Tx` now. A shared interface (if any) is decided in C-105 together with the handler layer.
-  - Fixture bodies stay `t.Skip` (filled in by C-101 / C-102); short names stay for C-006.
-- **Verified:** `go vet ./...` clean. `go test ./...` compiles and fails only with `TEST_DATABASE_URL must be set` (no database until C-003).
+### C-003 Local Postgres+PostGIS in Docker — 2026-10-11 — `376fdb0`
+- **Changed:** `docker-compose.yml` with `postgis/postgis:17-3.5`, a named volume, a health check and statement logging; an init script that creates `adas_test`; `.gitignore` covers `.env`.
+- **Decided:** Postgres 17.5 + PostGIS 3.5.2 is pinned, and Stages 2 and 3 must run the same version. `.env` is loaded by the shell (`set -a; source .env; set +a`), never by the program (`godotenv` rejected), so the program reads plain environment variables in every stage. The init script is mounted as a single file so the image's own `10_postgis.sh` still runs first. Statement logging is for development only.
 - **Follow-ups:** —
 
-### C-002 Real module path + dependency lockfile — 2026-10-11
-- **Written by:** claude (via /code-with-me)
-- **Commit(s):** `376fdb0` adas-cloud: workflow files, Docker database, naming refactor (C-000, C-002, C-003, C-004, C-006)
-- **What changed:**
-  - `go.mod`: module path `github.com/YOUR-ORG/adas-cloud` → `github.com/AbdurDRahman/RetroAdas/adas-cloud`; `go 1.22` → `go 1.24`.
-  - Updated the 7 imports in `cmd/server/main.go` and the three `_test.go` files.
-  - `go mod tidy` added the indirect dependencies (`go-spew`, `go-difflib`, `yaml.v3`) and created `go.sum`.
-- **Decisions made:**
-  - Module path follows the repository layout: repository `github.com/AbdurDRahman/RetroAdas`, folder `adas-cloud/`.
-  - Go 1.24, matching the installed toolchain.
-  - The `testdb` import alias breaks the naming rules but is left for C-006 rather than widening this task.
-- **Verified:** `go build ./...` passes. `go vet ./...` fails only on the two known fixture type errors (`*sql.Tx` vs `interface{ Exec(...) (any, error) }`), which C-004 fixes.
-- **Follow-ups:** — (C-004 is now unblocked)
+### C-004 Make the test suite compile (red, not broken) — 2026-10-11 — `376fdb0`
+- **Changed:** the `seedDevice` and `seedHazard` fixtures take `*sql.Tx`, so the tests compile.
+- **Decided:** fixtures share the test's transaction, because seeded rows are uncommitted and only that transaction can see them. A shared query interface, if any, is decided in C-105.
+- **Follow-ups:** —
 
-### C-000 Workflow files + staged roadmap — 2026-10-06
-- **Written by:** claude
-- **Commit(s):** `376fdb0` adas-cloud: workflow files, Docker database, naming refactor (C-000, C-002, C-003, C-004, C-006)
-- **What changed:**
-  - Added `TASKS.md` (full roadmap, Stages 0–3), `DONE.md` (this log), `CLAUDE.md` (session context + workflow loop), `docker-entrypoint.sh` (container entry point skeleton).
-- **Decisions made:**
-  - Workflow: pick → discuss → code → verify → close. Code is written either by the user or by Claude via `/code-with-me`.
-  - Roadmap in three stages: (1) laptop with docker compose, (2) single Azure VM, (3) multi-server Kubernetes. The Kubernetes flavor is deferred to C-301.
-  - Dev/test Postgres+PostGIS runs in Docker.
-  - In scope beyond the 3 core endpoints: provisioning CLI, crash auto-post, mobile-app support, rate limiting/abuse controls.
-  - `api_design.md` / `database_schema.md` will be supplied by the user (C-001), not recreated.
-  - The entrypoint runs migrations only when `RUN_MIGRATIONS=true`, so Stage 3 can run them once via a Job instead of in every replica.
+### C-002 Real module path + dependency lockfile — 2026-10-11 — `376fdb0`
+- **Changed:** module path `github.com/AbdurDRahman/RetroAdas/adas-cloud`, Go 1.24, `go.sum` created.
+- **Decided:** the module path follows the repository layout (repository + `adas-cloud/` folder).
+- **Follow-ups:** —
+
+### C-000 Workflow files + staged roadmap — 2026-10-06 — `376fdb0`
+- **Changed:** added `TASKS.md`, `DONE.md`, `CLAUDE.md` and the `docker-entrypoint.sh` skeleton.
+- **Decided:** the loop pick → discuss → code → verify → close; the stages laptop → single Azure VM → Kubernetes; the entry point runs migrations only when `RUN_MIGRATIONS=true`, so Stage 3 can run them once from a Job.
 - **Follow-ups:** —
