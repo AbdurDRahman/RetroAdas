@@ -50,12 +50,19 @@ wait_for_database() {
 }
 
 # --- 3. Optionally run migrations ------------------------------------------
+# The migrate binary (cmd/migrate, task C-005) carries the SQL files inside
+# itself and applies only the ones this database hasn't applied yet, so running
+# it on every container start is safe. MIGRATE_COMMAND only needs changing to
+# test this script outside the image.
+MIGRATE_COMMAND="${MIGRATE_COMMAND:-/app/migrate}"
+
 run_migrations() {
-	# TODO(C-005): call the chosen migration runner here (psql loop over
-	# database/migrations/*.sql, or a Go `migrate` binary). It must be
-	# idempotent: running it twice is a no-op.
-	log "RUN_MIGRATIONS=true but no migration runner exists yet (task C-005)"
-	exit 1
+	if ! "$MIGRATE_COMMAND"; then
+		# Stop here: starting the server on a half-updated schema would fail
+		# in confusing ways later. The failed file was rolled back as a whole.
+		log "migrations failed, not starting the server"
+		exit 1
+	fi
 }
 
 if [ "$WAIT_FOR_DATABASE" = "true" ]; then

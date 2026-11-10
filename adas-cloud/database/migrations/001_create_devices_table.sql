@@ -2,6 +2,7 @@
 -- POST /v1/devices/handshake) is authenticated against this table.
 -- See docs/design.md, sections 7 and 9.
 
+-- +goose Up
 CREATE TABLE IF NOT EXISTS devices (
     device_id     TEXT PRIMARY KEY,
     api_key_hash  TEXT NOT NULL,          -- hash only, never the raw key

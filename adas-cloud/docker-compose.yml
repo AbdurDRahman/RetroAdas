@@ -11,7 +11,8 @@ services:
     command: postgres -c log_statement=all
     environment:
       # Must match DATABASE_URL in .env.example. POSTGRES_DB is created
-      # automatically; adas_test is created by the init script below.
+      # automatically; adas_test is created by the init script below. Neither
+      # gets tables here: the migrate program applies migrations (task C-005).
       POSTGRES_USER: adas_user
       POSTGRES_PASSWORD: changeme
       POSTGRES_DB: adas_dev
@@ -24,9 +25,7 @@ services:
       # Scripts in /docker-entrypoint-initdb.d run ONCE, only when database_data
       # is empty, in file-name order. We mount a single file (not the folder) so
       # the image's own 10_postgis.sh stays visible and runs before ours.
-      - ./database/init/20_create_test_database_and_migrate.sh:/docker-entrypoint-initdb.d/20_create_test_database_and_migrate.sh:ro
-      # Mounted so the init script can apply the migration files.
-      - ./database/migrations:/migrations:ro
+      - ./database/init/20_create_test_database.sh:/docker-entrypoint-initdb.d/20_create_test_database.sh:ro
     healthcheck:
       # Lets `docker compose up --wait` (and later the api service) know when
       # Postgres actually accepts connections, not just when the container started.

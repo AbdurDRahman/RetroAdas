@@ -18,10 +18,21 @@ package testdatabase
 import (
 	"database/sql"
 	"os"
+	"sync"
 	"testing"
 
 	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/require"
+
+	"github.com/AbdurDRahman/RetroAdas/adas-cloud/database"
+)
+
+// Go builds every package's tests into a separate process, so "once" here
+// means once per package per `go test` run. Several packages migrating at the
+// same moment is safe: the migration lock makes them take turns (C-005).
+var (
+	migrateTestDatabaseOnce sync.Once
+	migrationError          error
 )
 
 // NewTransaction opens a transaction on the shared test database and
@@ -35,6 +46,14 @@ func NewTransaction(test *testing.T) *sql.Tx {
 
 	connectionPool, err := sql.Open("postgres", testDatabaseURL)
 	require.NoError(test, err)
+
+	// The first test in each test process brings adas_test up to date, so tests
+	// always run against the current schema with no manual step. Every later
+	// test in that process skips straight to the stored result.
+	migrateTestDatabaseOnce.Do(func() {
+		_, migrationError = database.Migrate(test.Context(), connectionPool)
+	})
+	require.NoError(test, migrationError, "migrating adas_test failed")
 
 	transaction, err := connectionPool.Begin()
 	require.NoError(test, err)

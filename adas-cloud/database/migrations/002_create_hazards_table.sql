@@ -1,6 +1,7 @@
 -- Core crowdsourced hazard data. See docs/design.md, sections 6 and 9;
 -- column and index names follow section 12.
 
+-- +goose Up
 CREATE EXTENSION IF NOT EXISTS postgis;
 
 CREATE TABLE IF NOT EXISTS hazards (
