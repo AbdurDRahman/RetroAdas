@@ -36,12 +36,14 @@ func run() error {
 	cntx, stopListeningForSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopListeningForSignals()
 
-	configuration, err := config.Load()
+	// Only the database URL: this program never checks API keys, so it must
+	// not need the pepper (and the Stage 3 Job must not be handed that secret).
+	databaseURL, err := config.LoadDatabaseURL()
 	if err != nil {
 		return err
 	}
 
-	connectionPool, err := database.Connect(configuration.DatabaseURL)
+	connectionPool, err := database.Connect(databaseURL)
 	if err != nil {
 		return err
 	}
