@@ -17,7 +17,10 @@ services:
       POSTGRES_PASSWORD: changeme
       POSTGRES_DB: adas_dev
     ports:
-      - "5432:5432"
+      # 127.0.0.1 = reachable from this computer only. Without it Docker opens
+      # the port on every network interface, so anyone on the same Wi-Fi could
+      # connect with the well-known development password.
+      - "127.0.0.1:5432:5432"
     volumes:
       # Named volume: data survives `docker compose down` and restarts.
       # `docker compose down -v` deletes it (and re-runs the init scripts next start).

@@ -1,8 +1,7 @@
 // Package devices handles authentication of incoming requests against the
-// devices table (docs/design.md, sections 7 and 9). Every write endpoint
-// (POST /v1/hazards, POST /v1/devices/handshake) and, depending on the open
-// decision in docs/design.md section 7, possibly GET /v1/hazards too, goes
-// through this package.
+// devices table (docs/design.md, sections 7 and 9). Every request except
+// registration and the health checks goes through this package, reads
+// included.
 package devices
 
 import (
@@ -34,12 +33,8 @@ const (
 // The raw key is hashed and compared against the stored api_key_hash —
 // the raw key is never persisted or logged.
 func Authenticate(transaction *sql.Tx, deviceID string, rawAPIKey string) (AuthenticationResult, error) {
-	// TODO(C-101): hash rawAPIKey with the same algorithm used at provisioning
-	// time (bcrypt vs a keyed hash is decided in C-101) before comparing.
-	//
-	// TODO(C-101): query:
-	//   SELECT api_key_hash, revoked FROM devices WHERE device_id = $1
-	// then:
+	// TODO(C-101): implement as agreed in docs/design.md section 7 (hashing
+	// method, comparison, and what happens for an unknown device). Outcomes:
 	//   - no row                           -> AuthenticationUnknownDevice
 	//   - row found, hash mismatch         -> AuthenticationUnknownDevice
 	//   - row found, hash matches, revoked -> AuthenticationRevoked

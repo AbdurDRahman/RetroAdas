@@ -1,16 +1,17 @@
 // Package handshake implements POST /v1/devices/handshake — the once-at-boot
-// check-in (docs/design.md sections 7 and 8). Build this after
-// internal/devices: it's thin (credential check + configuration echo)
-// compared to the hazards package.
+// identity check (docs/design.md sections 7 and 8). Build this after
+// internal/devices: it's thin compared to the hazards package.
 package handshake
 
-import "database/sql"
+import (
+	"database/sql"
+	"errors"
+)
 
-// Response is the JSON body of a successful handshake. A bare 200 OK with just
-// DeviceID is enough for MVP — the rest are optional tunables. Which tunables
-// it carries is settled in C-104: with the speed-based polling rule
-// (docs/design.md section 5), the per-poll values come back on every
-// GET /v1/hazards response instead, so some of these may be dropped.
+// Response is the JSON body of a successful handshake. The agreed design
+// returns only DeviceID and DeviceType; the three polling fields below are
+// outdated and C-104 removes them (polling values come back on every
+// GET /v1/hazards response instead).
 type Response struct {
 	DeviceID                string `json:"device_id"`
 	DeviceType              string `json:"device_type,omitempty"`
@@ -20,10 +21,9 @@ type Response struct {
 }
 
 // Handle authenticates the device (via internal/devices) and returns its
-// session configuration. Wire this up once internal/devices.Authenticate is
-// green.
+// identity. Wire this up once internal/devices.Authenticate is green.
 func Handle(transaction *sql.Tx, deviceID string) (Response, error) {
-	// TODO(C-104): call devices.Authenticate first (401/403 on failure), then
-	// build Response. Configuration values can be constants for MVP.
-	return Response{}, sql.ErrNoRows
+	// TODO(C-104): take the API key as well, call devices.Authenticate
+	// (401/403 on failure), then return the device's ID and type.
+	return Response{}, errors.New("not implemented")
 }

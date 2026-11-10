@@ -5,8 +5,13 @@ package hazards
 
 import (
 	"database/sql"
+	"errors"
 	"time"
 )
+
+// errNotImplemented is what the placeholder functions in this package return
+// until their task (C-102, C-103) writes them.
+var errNotImplemented = errors.New("not implemented")
 
 // Report is the input for a newly detected hazard, matching the JSON body of
 // POST /v1/hazards (docs/design.md section 8; field names in section 12).
@@ -17,68 +22,60 @@ type Report struct {
 	HeadingDegrees float64
 	Confidence     float64
 	ReportedBy     string // device_id, set by the handler after authentication
+	// C-102 adds the report's source (derived from the device type) and makes
+	// Confidence optional, because manual reports have none (design section 4).
 }
 
-// Outcome is what ProcessReport returns, matching the two possible responses
-// of POST /v1/hazards: 201 "created" vs 200 "confirmed".
+// Outcome is what ProcessReport returns, matching the responses of
+// POST /v1/hazards (docs/design.md section 8).
 type Outcome struct {
 	ID            int64
-	Status        string // "created" | "confirmed"
+	Status        string // "created" | "confirmed" | "already_reported"
 	Confirmations int
 	ExpiresAt     time.Time
 }
 
 // deduplicationRadiusMeters is the distance within which a new report of the
 // same event_tag is treated as confirming an existing hazard rather than a new
-// one. Flat for all event_tags for now — C-102 moves it into the per-tag
-// event-tag registry (docs/design.md section 4).
+// one. Flat for all event_tags for now, which is NOT the agreed design: each
+// tag has its own radius. C-102 replaces this constant with the event-tag
+// registry (docs/design.md section 4).
 const deduplicationRadiusMeters = 100
 
-// ProcessReport implements deduplication-on-write (docs/design.md section 6):
-//  1. Look for an existing, non-expired hazard with the same event_tag
-//     within deduplicationRadiusMeters.
-//  2. If found: increment confirmations, reset expires_at, return it.
-//  3. If not found: insert a new row with expires_at = now() + time to live.
+// ProcessReport implements deduplication-on-write. The rules are in
+// docs/design.md section 6; in short:
+//  1. Find the nearest live hazard with the same event_tag inside that tag's
+//     deduplication radius.
+//  2. None found: insert a new hazard (confirmations start at 1, and the
+//     reporter gets a hazard_confirmations row) -> "created".
+//  3. Found, and this device has not reported it before: add the device's
+//     hazard_confirmations row, increment confirmations, reset expires_at
+//     -> "confirmed".
+//  4. Found, and this device already reported it: change nothing
+//     -> "already_reported".
 //
 // location is intentionally NOT updated on confirmation — the original
 // report's coordinates stay authoritative, to avoid drift across many reports.
 func ProcessReport(transaction *sql.Tx, report Report) (Outcome, error) {
-	// TODO(C-102):
-	// 1. SELECT id FROM hazards
-	//    WHERE event_tag = report.EventTag
-	//      AND expires_at > now()
-	//      AND ST_DWithin(location, ST_MakePoint(report.Longitude, report.Latitude)::geography, deduplicationRadiusMeters)
-	//    LIMIT 1
-	//    (C-102 also adds: nearest match first, and one confirmation per device.)
-	// 2. If a row matched:
-	//      UPDATE hazards
-	//      SET confirmations = confirmations + 1,
-	//          expires_at = now() + timeToLiveFor(report.EventTag)
-	//      WHERE id = $1
-	//      RETURNING id, confirmations, expires_at
-	//    -> Outcome{Status: "confirmed", ...}
-	// 3. Else:
-	//      INSERT INTO hazards (event_tag, location, heading_degrees, confidence,
-	//                            reported_by, expires_at)
-	//      VALUES (..., now() + timeToLiveFor(report.EventTag))
-	//      RETURNING id, expires_at
-	//    -> Outcome{Status: "created", Confirmations: 0, ...}
-	return Outcome{}, sql.ErrNoRows
+	// TODO(C-102): implement the steps above. The tag's radius and time to
+	// live come from the event-tag registry and are passed to the query as
+	// parameters.
+	return Outcome{}, errNotImplemented
 }
 
 // timeToLiveFor returns the lifetime to apply at insert/confirmation time for
-// a given event_tag. Values are illustrative placeholders pending
-// field-testing data; C-102 moves them into the event-tag registry
-// (docs/design.md section 4).
+// a given event_tag. C-102 replaces this function and
+// deduplicationRadiusMeters with the event-tag registry
+// (docs/design.md section 4), which also rejects unknown tags.
 func timeToLiveFor(eventTag string) time.Duration {
 	switch eventTag {
-	case "checkpost":
-		return 4 * time.Hour
 	case "accident":
 		return 90 * time.Minute
-	case "pothole", "debris":
+	case "pothole":
 		return 14 * 24 * time.Hour
-	default:
+	case "checkpost":
+		return 4 * time.Hour
+	default: // "debris"
 		return 24 * time.Hour
 	}
 }

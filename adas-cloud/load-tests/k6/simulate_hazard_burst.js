@@ -11,6 +11,8 @@ import http from 'k6/http';
 import { check } from 'k6';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
+// Not usable yet: keys are per device (docs/design.md section 7), so five
+// device IDs cannot share one key. C-113 gives each virtual device its own.
 const API_KEY = __ENV.API_KEY || 'replace-with-a-seeded-test-key';
 
 // `vus` (virtual users) is k6's own option name — it can't be renamed.
@@ -20,8 +22,8 @@ export const options = {
 };
 
 // All 5 virtual devices report a hazard at (roughly) the same coordinates,
-// well within the 100 meter deduplication radius, to trigger
-// confirmation-not-insert.
+// well within the pothole deduplication radius (docs/design.md section 4), to
+// trigger confirmation-not-insert.
 const HAZARD_LATITUDE = 33.6850;
 const HAZARD_LONGITUDE = 73.0490;
 

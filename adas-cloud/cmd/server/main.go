@@ -23,8 +23,8 @@ func main() {
 
 	router := http.NewServeMux()
 
-	// TODO: wire up the three endpoints once their underlying packages are
-	// green under TDD:
+	// TODO(C-105): wire up the endpoints listed in docs/design.md section 8
+	// once their underlying packages are green under TDD, starting with:
 	//   POST /v1/devices/handshake -> internal/handshake
 	//   POST /v1/hazards           -> internal/hazards.ProcessReport
 	//   GET  /v1/hazards           -> internal/hazards.FindNearby

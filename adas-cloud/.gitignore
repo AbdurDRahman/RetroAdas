@@ -7,8 +7,8 @@
 
 # Binaries from `go build ./cmd/...` run in this folder.
 /server
+/migrate
 /provision
-/cleanup
 
 # Go test coverage output.
 *.out

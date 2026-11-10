@@ -41,9 +41,9 @@ All Stage 0 tasks are done (see `DONE.md`).
 ### C-101 Device authentication
 - **Goal:** every write is authenticated as `device_id` + API key against `devices`, with only a hash stored.
 - **Done when:** `devices.Authenticate` and `seedDevice` are implemented as in `docs/design.md` section 7 — HMAC-SHA256 with the `API_KEY_PEPPER` pepper (read in `config/`, added to `.env.example`), constant-time comparison, a dummy hash for unknown devices, `401` for unknown device and wrong key alike, `403` for revoked; the `test.Skip` line at the top of `TestAuthenticate` is removed and all 4 cases pass; raw key never logged.
-- **Touches:** `internal/devices/*`.
+- **Touches:** `internal/devices/*`, `config/config.go`, `.env.example`.
 - **Depends on:** C-003, C-004
-- **Discuss:** how to test the dummy-hash timing rule (or accept it as a code-review item). Hashing method decided in C-001: HMAC-SHA256 with a pepper, not bcrypt.
+- **Discuss:** how to test the dummy-hash timing rule (or accept it as a code-review item); `cmd/migrate` uses the same `config.Load()` as the server, so a required `API_KEY_PEPPER` would force the migrate program (and the Stage 3 Job) to carry a secret it never uses — keep the pepper out of what `migrate` needs. Hashing method decided in C-001: HMAC-SHA256 with a pepper, not bcrypt.
 - **Who:** tbd
 
 ### C-102 Deduplication on write (`ProcessReport`)
@@ -58,7 +58,7 @@ All Stage 0 tasks are done (see `DONE.md`).
   - schema matches `docs/design.md` section 9: `hazards.id` is `GENERATED ALWAYS AS IDENTITY`, `confirmations` starts at 1, `confidence` is nullable, and the original reporter gets a `hazard_confirmations` row together with the hazard.
 - **Touches:** `internal/hazards/deduplication*.go`, `internal/hazards/event_tags.go`, new migrations for confirmations and for `source` + the check constraint.
 - **Depends on:** C-001, C-101 (fixture style), C-004
-- **Discuss:** the race between SELECT and INSERT — `pg_advisory_xact_lock` on (tag, grid cell), `SERIALIZABLE` + retry, or accept the rare duplicate? Time to live and deduplication radius come from the Go registry and are passed to the query as parameters.
+- **Discuss:** whether to split this task in three (registry + schema changes; deduplication with one confirmation per device; the simultaneous-reports race) — it is large for one task. The race between SELECT and INSERT — `pg_advisory_xact_lock` on (tag, grid cell), `SERIALIZABLE` + retry, or accept the rare duplicate? Time to live and deduplication radius come from the Go registry and are passed to the query as parameters.
 - **Who:** tbd
 
 ### C-103 Projected lookahead search (`FindNearby`)
@@ -143,10 +143,10 @@ All Stage 0 tasks are done (see `DONE.md`).
 
 ### C-113 Local k6 baseline
 - **Goal:** prove the full stack works under simulated fleet traffic before touching Azure.
-- **Done when:** both k6 scripts run via the `grafana/k6` Docker image against the compose stack using keys from C-107; burst test shows dedup (1 row, N-1 confirmations); p95 latency + error rate recorded in `docs/results.md`.
+- **Done when:** both k6 scripts run via the `grafana/k6` Docker image against the compose stack using keys from C-107; burst test shows deduplication (N devices give 1 row with `confirmations` = N, because the first reporter counts — `docs/design.md` section 6); each virtual device sends its own key (keys are per device, so the burst script's single shared `API_KEY` cannot work); p95 latency + error rate recorded in `docs/results.md`.
 - **Touches:** `load-tests/k6/*`, `docs/results.md`.
 - **Depends on:** C-107, C-112
-- **Discuss:** one key per virtual device vs shared key; scenario sizes.
+- **Discuss:** how the scripts receive one `device_id` + key per virtual device (for example a file written by the C-107 tool); scenario sizes.
 - **Who:** tbd
 
 ---

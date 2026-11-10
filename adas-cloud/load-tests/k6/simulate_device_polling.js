@@ -22,12 +22,14 @@ export const options = {
   duration: '30s',
 };
 
-// A crude straight-line "drive": start point + fixed heading, advancing about
-// 300 meters of latitude per iteration. Good enough for load shape; not meant
-// to be geographically precise.
+// A crude straight-line "drive" due north: each iteration adds about 300
+// meters of latitude. Good enough for load shape; not meant to be
+// geographically precise.
 let latitude = 33.6844;
 let longitude = 73.0479;
-const HEADING_DEGREES = 142.0;
+// 0 = north, matching the direction the latitude moves in. The server looks
+// ahead along this heading, so it must agree with where the car is going.
+const HEADING_DEGREES = 0.0;
 const SPEED_KILOMETERS_PER_HOUR = 38.0;
 
 // One degree of latitude is about 111 kilometers, so 0.0027 degrees is about 300 meters.

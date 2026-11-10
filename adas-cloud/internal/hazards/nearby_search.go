@@ -10,7 +10,9 @@ type SearchQuery struct {
 	Longitude              float64
 	HeadingDegrees         float64
 	SpeedKilometersPerHour float64
-	RadiusMeters           int
+	// Outdated: the client never sends a radius (docs/design.md section 8).
+	// C-103 removes this field and computes the radius from the speed.
+	RadiusMeters int
 }
 
 // LookaheadDistanceMeters is the fixed distance ahead of the vehicle's
@@ -51,5 +53,5 @@ func FindNearby(transaction *sql.Tx, searchQuery SearchQuery) ([]NearbyHazard, e
 	// WHERE expires_at > now()
 	//   AND ST_DWithin(location, projected, searchQuery.RadiusMeters)
 	// ORDER BY distance_meters ASC
-	return nil, sql.ErrNoRows
+	return nil, errNotImplemented
 }
