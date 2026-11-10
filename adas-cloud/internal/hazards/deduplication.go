@@ -35,13 +35,6 @@ type Outcome struct {
 	ExpiresAt     time.Time
 }
 
-// deduplicationRadiusMeters is the distance within which a new report of the
-// same event_tag is treated as confirming an existing hazard rather than a new
-// one. Flat for all event_tags for now, which is NOT the agreed design: each
-// tag has its own radius. C-102 replaces this constant with the event-tag
-// registry (docs/design.md section 4).
-const deduplicationRadiusMeters = 100
-
 // ProcessReport implements deduplication-on-write. The rules are in
 // docs/design.md section 6; in short:
 //  1. Find the nearest live hazard with the same event_tag inside that tag's
@@ -58,24 +51,7 @@ const deduplicationRadiusMeters = 100
 // report's coordinates stay authoritative, to avoid drift across many reports.
 func ProcessReport(transaction *sql.Tx, report Report) (Outcome, error) {
 	// TODO(C-102): implement the steps above. The tag's radius and time to
-	// live come from the event-tag registry and are passed to the query as
-	// parameters.
+	// live come from the event-tag registry (LookUpEventTag) and are passed to
+	// the query as parameters.
 	return Outcome{}, errNotImplemented
-}
-
-// timeToLiveFor returns the lifetime to apply at insert/confirmation time for
-// a given event_tag. C-102 replaces this function and
-// deduplicationRadiusMeters with the event-tag registry
-// (docs/design.md section 4), which also rejects unknown tags.
-func timeToLiveFor(eventTag string) time.Duration {
-	switch eventTag {
-	case "accident":
-		return 90 * time.Minute
-	case "pothole":
-		return 14 * 24 * time.Hour
-	case "checkpost":
-		return 4 * time.Hour
-	default: // "debris"
-		return 24 * time.Hour
-	}
 }
