@@ -14,12 +14,16 @@ project after a break doesn't require remembering a convention:
 ```
 adas-cloud/
 ├── cmd/server/main.go        Program entrypoint. Wires configuration + database + routes together.
+├── cmd/migrate/main.go       Applies pending migrations, then exits. Runs before
+│                             the server (entrypoint script / Kubernetes Job).
 ├── config/                   Reads all environment variables, once, in one place.
 ├── database/
 │   ├── connection.go         How the running SERVER connects to Postgres.
-│   ├── migrations/           Plain numbered .sql files, one per table.
+│   ├── migrate.go            The migration runner (goose), with the .sql files
+│   │                         built into the binary.
+│   ├── migrations/           Numbered .sql files, applied in order, each once.
 │   ├── init/                 Runs once on a fresh Docker database: creates
-│   │                         adas_test and applies the migrations to both.
+│   │                         the empty adas_test database (no tables).
 │   └── testdatabase/         How TESTS connect to Postgres (transaction-
 │                             per-test, always rolled back). Deliberately
 │                             separate from connection.go so production code
@@ -76,8 +80,8 @@ exactly like the documented request format from day one.
 Needs Docker (on WSL: Docker Desktop with WSL integration enabled) and Go 1.24.
 
 ```bash
-# 1. Start Postgres 17 + PostGIS 3.5. The first start creates adas_dev and
-#    adas_test and applies database/migrations/*.sql to both.
+# 1. Start Postgres 17 + PostGIS 3.5. The first start creates the empty
+#    adas_dev and adas_test databases.
 docker compose up -d --wait database
 
 # 2. Local credentials. .env is gitignored; the defaults already match the
@@ -88,7 +92,10 @@ cp .env.example .env
 #    set -a exports every variable that follows; set +a stops that.
 set -a; source .env; set +a
 
-# 4. Run the tests against adas_test.
+# 4. Create the tables in adas_dev (safe to repeat: it only applies new files).
+go run ./cmd/migrate
+
+# 5. Run the tests against adas_test (they migrate adas_test themselves).
 go test ./...
 ```
 
@@ -101,11 +108,31 @@ docker compose down                                     # stop, keep data
 docker compose down -v                                  # stop AND delete all data
 ```
 
-**New migration files are not applied automatically yet.** The init script
-(`database/init/`) only runs when the data volume is empty. After adding a
-migration, either reset with `docker compose down -v` (deletes all data) or
-apply it by hand with `psql -f`. Task C-005 replaces this with a proper
-migration runner.
+### Migrations
+
+`database/migrations/` holds numbered `.sql` files. The migrate program
+(`cmd/migrate`, using the [goose](https://github.com/pressly/goose) library)
+applies the ones a database hasn't applied yet, in order, and records them in
+the `schema_migrations` table. Each file runs in one transaction with its
+record, so a failing file leaves no trace; a Postgres advisory lock makes two
+runs at the same time take turns.
+
+Where it runs: `go run ./cmd/migrate` by hand; the container entry point when
+`RUN_MIGRATIONS=true` (Stages 1 and 2); a one-off Kubernetes Job (Stage 3).
+Tests migrate `adas_test` themselves.
+
+To add a migration:
+
+1. Create the next file, e.g. `003_create_hazard_confirmations_table.sql`,
+   starting with the line `-- +goose Up`. Forward only: no `-- +goose Down`
+   section; to undo a change, write another migration.
+2. Add its name to `expectedMigrationFileNames` in `database/migrate_test.go`.
+3. Run `go run ./cmd/migrate` and `go test ./...`.
+
+Until the first deploy to the Azure VM (Stage 2), an applied file may still be
+edited in place, followed by `docker compose down -v`. From Stage 2 on, never
+edit an applied file — goose would skip it and the databases would quietly
+differ from the file. Add a new one instead.
 
 ## How work is organized
 

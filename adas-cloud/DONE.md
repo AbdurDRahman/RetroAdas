@@ -19,9 +19,31 @@ Entry template:
 
 ---
 
+### C-005 Migration runner — 2026-11-10
+- **Written by:** claude (via `/code-with-me`, each step reviewed by the user)
+- **Commit(s):** — (not committed yet)
+- **What changed:**
+  - `database/migrate.go`: `Migrate(cntx, connectionPool)` runs goose with the `.sql` files embedded in the binary, an advisory lock, and the record table `schema_migrations`; returns the names of the files it applied.
+  - `cmd/migrate/main.go`: the program that runs it and exits (exit code 1 on failure; Ctrl+C / SIGTERM cancels cleanly).
+  - `docker-entrypoint.sh`: `run_migrations` calls `/app/migrate` and refuses to start the server if it fails.
+  - `database/init/20_create_test_database_and_migrate.sh` → `20_create_test_database.sh`: only creates `adas_test`; `docker-compose.yml` no longer mounts the migrations folder.
+  - Tests: `testdatabase.NewTransaction` migrates `adas_test` once per test process; `testdatabase.NewEmptyDatabase` gives a test a throwaway empty database; `database/migrate_test.go` covers "everything once, then nothing" and "two runs at the same moment".
+  - Migrations 001 and 002 start with `-- +goose Up`. `go.mod`: goose v3.26.0 added; testify v1.9.0 → v1.11.0 (required by goose).
+- **Decisions made:**
+  - **goose, not our own runner and not golang-migrate** (user's call after pushing back on writing our own: an existing, proven library is preferred when it does the job). goose runs each file in one transaction together with its record, so a failing file leaves no trace; golang-migrate would leave a "dirty" flag to fix by hand. Scaling is not a differentiator: every option handles Stage 3 with a one-off Job plus a lock.
+  - **goose v3.26.0**, the newest release that supports Go 1.24 (v3.27+ needs Go 1.25+).
+  - **Record table named `schema_migrations`**, not goose's default `goose_db_version` (naming rule). Its row `0` is goose's own starting marker.
+  - **Lock retries every 1 second, for up to 5 minutes** (goose default: every 5 seconds).
+  - **Forward only:** no `-- +goose Down` sections; a change is undone by a new migration.
+  - **Editing applied files:** allowed until the first Stage 2 deploy (then `docker compose down -v`); never after. goose has no checksum, so this is a rule, not something the runner enforces.
+  - **One path for migrations:** the init script no longer applies them; tests migrate `adas_test` themselves. A new migration's name also goes into `expectedMigrationFileNames` in the test, on purpose.
+  - **The server never migrates on its own**; `migrate` runs before it (entry point in Stages 1–2, Kubernetes Job in Stage 3).
+- **Verified:** after `docker compose down -v` + `up`, `adas_dev` and `adas_test` exist with no tables; `go run ./cmd/migrate` applied 001 and 002, the second run printed "database already up to date"; `go test ./...`: `database` passes (both migration tests; the concurrent one takes ~1 s longer because one run waits for the lock), `adas_test` was migrated by the tests, no `adas_test_empty_*` databases left behind; `internal/devices` and `internal/hazards` still fail as planned (stubs for C-101 / C-102). Entry point checked locally with a built `migrate`: success starts the command, failure stops with exit 1. `go vet ./...` clean.
+- **Follow-ups:** none new; C-112 now also builds `/app/migrate`, and C-304's Job runs it.
+
 ### C-001 Finalize the backend design — 2026-11-04
 - **Written by:** claude drafted each section, user reviewed and approved it
-- **Commit(s):** — (not committed yet)
+- **Commit(s):** `30be8c6` C-001: agreed backend design (registry, identity, endpoints, data, abuse controls)
 - **What changed:**
   - `docs/design.md`: every section agreed — event-tag registry (4), polling (5), hazard lifecycle (6), identity and security analysis (7), all endpoint request and response bodies (8), data entities (9), abuse controls (10); the decision log (13) sorted by section.
   - `api_design.md`, `database_schema.md` marked superseded (kept for history).

@@ -24,13 +24,7 @@ ID ranges: `C-0xx` Stage 0, `C-1xx` Stage 1, `C-2xx` Stage 2, `C-3xx` Stage 3.
 
 ## Stage 0 — Foundations
 
-### C-005 Pick the migration runner
-- **Goal:** migrations must run exactly once per deploy in every stage — including Stage 3, where many replicas start at the same time.
-- **Done when:** a runner is chosen and implemented; it records applied migrations (e.g. `schema_migrations` table); `docker-entrypoint.sh`'s `run_migrations` calls it; running it twice is a no-op.
-- **Touches:** `database/`, `docker-entrypoint.sh`, possibly `cmd/migrate/`.
-- **Depends on:** C-003
-- **Discuss:** `psql` loop in the entrypoint vs Go-embedded migrations (`embed` + a small runner or `golang-migrate`). Note the Stage 3 constraint: run as a one-off K8s Job, not in every pod.
-- **Who:** tbd
+All Stage 0 tasks are done (see `DONE.md`).
 
 ---
 
@@ -133,7 +127,7 @@ ID ranges: `C-0xx` Stage 0, `C-1xx` Stage 1, `C-2xx` Stage 2, `C-3xx` Stage 3.
 
 ### C-112 Container image
 - **Goal:** the server ships as one small image used unchanged in all three stages.
-- **Done when:** multi-stage `Dockerfile` (Go build → small runtime image) uses `docker-entrypoint.sh` as `ENTRYPOINT`; `api` service added to `docker-compose.yml`; `docker compose up` gives a working API on :8080 with migrations applied.
+- **Done when:** multi-stage `Dockerfile` (Go build → small runtime image) builds both `cmd/server` and `cmd/migrate` into `/app/server` and `/app/migrate` (the path `docker-entrypoint.sh` calls); uses `docker-entrypoint.sh` as `ENTRYPOINT`; `api` service added to `docker-compose.yml`; `docker compose up` gives a working API on :8080 with migrations applied.
 - **Touches:** `Dockerfile`, `.dockerignore`, `docker-compose.yml`, `docker-entrypoint.sh`.
 - **Depends on:** C-005, C-106
 - **Discuss:** runtime base (distroless vs alpine — the entrypoint needs `/bin/sh`, and `pg_isready` if `WAIT_FOR_DATABASE` is used).
@@ -239,7 +233,7 @@ ID ranges: `C-0xx` Stage 0, `C-1xx` Stage 1, `C-2xx` Stage 2, `C-3xx` Stage 3.
 
 ### C-304 Kubernetes manifests
 - **Goal:** run the same image as N identical replicas.
-- **Done when:** Deployment (replicas, resources, liveness `/healthz`, readiness `/readyz`, `RUN_MIGRATIONS=false`), Service, ConfigMap, Secret, and a migration Job; `kubectl apply` brings it up from scratch.
+- **Done when:** Deployment (replicas, resources, liveness `/healthz`, readiness `/readyz`, `RUN_MIGRATIONS=false`), Service, ConfigMap, Secret, and a migration Job (runs `/app/migrate` from the same image, C-005); `kubectl apply` brings it up from scratch.
 - **Touches:** `deploy/k8s/`.
 - **Depends on:** C-302, C-303, C-106
 - **Discuss:** plain YAML vs Kustomize; how the migration Job is run before rollout.
