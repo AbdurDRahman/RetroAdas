@@ -245,7 +245,9 @@ device is valid and returns its configuration.
 
 **Hashing** (C-101): HMAC-SHA256 with a server-side secret ("pepper") held in the environment
 variable `API_KEY_PEPPER` — never in the database or in git; a Kubernetes Secret in Stage 3.
-Changing the pepper invalidates every key.
+Changing the pepper invalidates every key. The server refuses to start if the pepper is
+missing or shorter than 32 characters; programs that only use the database (`migrate`) never
+need it.
 
 **Jetson units** are provisioned with a command-line tool (C-107). **Phones** register
 themselves: `POST /v1/devices/register` needs no key and returns a new `device_id` + API key
@@ -518,7 +520,7 @@ Which tables exist and why; exact columns and SQL are designed in each task.
 
 | Table | Holds | Changes from today's migrations |
 |---|---|---|
-| `devices` | `device_id` (e.g. `jetson-4f9c2a1b`), the HMAC hash of the API key, `device_type`, `created_at`, `revoked` | Exists (migration 001). Add a check: `device_type` is `jetson_unit` or `mobile_app`. |
+| `devices` | `device_id` (e.g. `jetson-4f9c2a1b`), the HMAC hash of the API key, `device_type`, `created_at`, `revoked` | Exists (migration 001), with a check that `device_type` is `jetson_unit` or `mobile_app`. |
 | `hazards` | One row per real-world hazard: `event_tag`, `location`, optional `heading_degrees`, `confidence` (null for manual), `source`, `reported_by`, `confirmations`, `created_at`, `expires_at` | Exists (migration 002). Add `source` and the checks (`source`/`confidence` pairing from section 4, heading from 0 up to 360). `confidence` becomes nullable; `confirmations` starts at 1 (section 6). `id` switches from `BIGSERIAL` to `GENERATED ALWAYS AS IDENTITY`. Unknown tags are rejected by the handler, not the database. |
 | `hazard_confirmations` | One row per (hazard, device) pair, with the time | New (C-102). |
 | Report rate-limit counter | Reports per device per time window | New (C-110, section 10). |
@@ -667,6 +669,7 @@ been deployed, so no follow-up migration is needed; local databases are reset wi
 | `confirmations` counts reporting devices, the first reporter included; a repeat is recognized by location first, then by `hazard_confirmations` | Section 6 |
 | Clients report each hazard once (tracker ID, or a short distance-and-time memory); the server check is the safety net | Section 6 |
 | Per-device keys on every request, reads included; HMAC-SHA256 with a pepper, not bcrypt; same `401` for unknown device and wrong key, plus a dummy hash | Section 7 |
+| The server refuses to start with a pepper shorter than 32 characters; `migrate` never needs the pepper (C-101) | Section 7 |
 | `device_id` = type prefix + 8 random hexadecimal characters; key = 32 random bytes, URL-safe base64, shown once | Section 7 |
 | Phones self-register through `POST /v1/devices/register`; same trust as Jetson units | Section 7 |
 | HTTPS mandatory beyond the laptop; never log coordinates with a device ID in Stages 2 and 3 | Section 7 |

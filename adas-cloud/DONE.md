@@ -19,6 +19,16 @@ Entry template:
 
 ---
 
+### C-101 Device authentication — 2026-11-10 — `b8aac77`, `d177efe`, `26e266e`
+- **Changed:** `devices.HashAPIKey` and `devices.Authenticate` (one lookup, one path, returns the device type); `API_KEY_PEPPER` in `config.Load`, plus `config.LoadDatabaseURL` for `cmd/migrate`; a `device_type` check in migration 001.
+- **Decided:** design section 7. Also: the pepper is passed to `Authenticate` as a parameter, so tests use a fixed test pepper and need no environment variable; the timing rule is kept by the shape of the code (a fake hash for unknown devices), not by a timing test; Argon2id was considered and rejected for the same reasons as bcrypt (it would be the right choice for user passwords).
+- **Follow-ups:** — (C-107 gained the "stored value is never the raw key" test; C-105 passes the pepper from the config)
+
+### C-206 Checks on every push (continuous integration) — 2026-11-10 — `1085f7f`
+- **Changed:** `../.github/workflows/adas-cloud-tests.yml` runs the formatting check, `go vet`, the build and `go test ./...` against PostGIS on every push that touches `adas-cloud/`. First run on GitHub: green, about 50 seconds.
+- **Decided:** moved up from Stage 2 because it is cheap. A test for a function that isn't written yet starts with `test.Skip("C-xxx: ...")`, so a red result always means a real problem; the task's first step removes that line.
+- **Follow-ups:** —
+
 ### C-005 Migration runner — 2026-11-10 — `ad4c921`
 - **Changed:** `database.Migrate` (goose, `.sql` files built into the program) and `cmd/migrate`; the entry point calls `/app/migrate`; the database init script only creates `adas_test`; tests migrate `adas_test` themselves.
 - **Decided:** design section 9. Also: goose v3.26.0 is the newest release that works with Go 1.24; a new migration's file name must be added to `expectedMigrationFileNames` in `database/migrate_test.go`; the migration tests need a database user that may create databases.

@@ -30,22 +30,6 @@ All Stage 0 tasks are done (see `DONE.md`).
 
 ## Stage 1 — Laptop (core API, all features, docker compose)
 
-### C-206 Checks on every push (continuous integration)
-- **Goal:** every push to GitHub runs the real-database test suite. Moved up from Stage 2: it is cheap, and it catches "works only on my laptop" early.
-- **Done when:** the first run of `../.github/workflows/adas-cloud-tests.yml` is green on GitHub. The workflow is written and its steps were rehearsed locally against a fresh PostGIS container (formatting, `go vet`, build, `go test ./...`); only the first real run is left.
-- **Touches:** `../.github/workflows/adas-cloud-tests.yml`.
-- **Depends on:** C-003, C-005
-- **Discuss:** — (path filters: only pushes touching `adas-cloud/` or the workflow file trigger it)
-- **Who:** claude
-
-### C-101 Device authentication
-- **Goal:** every write is authenticated as `device_id` + API key against `devices`, with only a hash stored.
-- **Done when:** `devices.Authenticate` and `seedDevice` are implemented as in `docs/design.md` section 7 — HMAC-SHA256 with the `API_KEY_PEPPER` pepper (read in `config/`, added to `.env.example`), constant-time comparison, a dummy hash for unknown devices, `401` for unknown device and wrong key alike, `403` for revoked; the `test.Skip` line at the top of `TestAuthenticate` is removed and all 4 cases pass; raw key never logged.
-- **Touches:** `internal/devices/*`, `config/config.go`, `.env.example`.
-- **Depends on:** C-003, C-004
-- **Discuss:** how to test the dummy-hash timing rule (or accept it as a code-review item); `cmd/migrate` uses the same `config.Load()` as the server, so a required `API_KEY_PEPPER` would force the migrate program (and the Stage 3 Job) to carry a secret it never uses — keep the pepper out of what `migrate` needs. Hashing method decided in C-001: HMAC-SHA256 with a pepper, not bcrypt.
-- **Who:** tbd
-
 ### C-102 Deduplication on write (`ProcessReport`)
 - **Goal:** the core business logic — a re-report within the tag's deduplication radius of a live hazard with the same tag confirms it instead of inserting a duplicate.
 - **Done when:** the event-tag registry from `docs/design.md` section 4 exists in Go (`internal/hazards/event_tags.go`, replacing the hard-coded `timeToLiveFor` and `deduplicationRadiusMeters`); `hazards.ProcessReport` and `seedHazard` are implemented; the `test.Skip` line at the top of `TestProcessReport` is removed and all its cases pass; new tests cover:
@@ -79,7 +63,7 @@ All Stage 0 tasks are done (see `DONE.md`).
 
 ### C-105 HTTP layer
 - **Goal:** expose the three endpoints over HTTP with consistent authentication, validation and errors.
-- **Done when:** `POST /v1/devices/handshake`, `POST /v1/hazards`, `GET /v1/hazards` are routed in `cmd/server`; authentication middleware reads `X-Device-Id` / `X-Api-Key` (same as the k6 scripts); status codes, bodies and the error shape follow `docs/design.md` section 8 (`created` → 201, `confirmed` / `already_reported` → 200; `source` derived from the device type); `event_tag` checked against the Go registry (unknown tag → 400, tag not allowed for the device type → 403); handler tests use `httptest`.
+- **Done when:** `POST /v1/devices/handshake`, `POST /v1/hazards`, `GET /v1/hazards` are routed in `cmd/server`; authentication middleware reads `X-Device-Id` / `X-Api-Key` (same as the k6 scripts) and calls `devices.Authenticate` with `configuration.APIKeyPepper`; status codes, bodies and the error shape follow `docs/design.md` section 8 (`created` → 201, `confirmed` / `already_reported` → 200; `source` derived from the device type); `event_tag` checked against the Go registry (unknown tag → 400, tag not allowed for the device type → 403); handler tests use `httptest`.
 - **Touches:** `cmd/server/main.go`, new `internal/httpapi/` (or similar), core package signatures.
 - **Depends on:** C-102, C-103, C-104
 - **Discuss:** core functions currently take `*sql.Tx` — switch to a small `Querier` interface so handlers can pass `*sql.DB` or a transaction and tests keep using rollback transaction? Package name/layout for handlers. (Error shape decided in C-001.)
@@ -95,7 +79,7 @@ All Stage 0 tasks are done (see `DONE.md`).
 
 ### C-107 Device provisioning CLI
 - **Goal:** create and revoke devices without hand-written SQL — needed for real units, the mobile app, and k6.
-- **Done when:** `go run ./cmd/provision create --type jetson_unit` prints a new `device_id` + raw key **once** and stores only the hash; `revoke <device_id>` works; it reuses the hash function from C-101.
+- **Done when:** `go run ./cmd/provision create --type jetson_unit` prints a new `device_id` + raw key **once** and stores only the hash; `revoke <device_id>` works; it reuses `devices.HashAPIKey` from C-101; a test checks that the stored value is never the raw key.
 - **Touches:** `cmd/provision/`, `internal/devices/`.
 - **Depends on:** C-101
 - **Discuss:** — (formats decided in C-001: `device_id` = type prefix + 8 random hexadecimal characters, e.g. `jetson-4f9c2a1b`; key = 32 random bytes as URL-safe base64, shown once).
