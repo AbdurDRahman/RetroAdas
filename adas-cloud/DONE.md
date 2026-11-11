@@ -19,6 +19,11 @@ Entry template:
 
 ---
 
+### C-102 Deduplication on write (`ProcessReport`) — 2026-11-11 — `74de0a7`
+- **Changed:** `hazards.ProcessReport` refuses invalid reports with named errors, finds the nearest live match (same tag, the tag's radius, same direction where it matters), then creates, confirms or recognizes a repeat; 33 test cases.
+- **Decided:** design sections 4 and 6. Also: `ON CONFLICT DO NOTHING` on `hazard_confirmations` decides "new device or repeat" in one statement; inside one transaction `now()` never moves, so tests seed a hazard with a different expiry (1 hour) to see a reset; tests that pass at once were checked by breaking the query on purpose.
+- **Follow-ups:** — (C-105 maps the named errors; C-103 reuses the direction threshold)
+
 ### C-115 Event-tag registry and hazard schema — 2026-11-10 — `4ff33d3`, `630636b`, `f1a7b55`
 - **Changed:** the tag registry in `internal/hazards/event_tags.go`; `hazards` gains `source`, its checks and identity ids (migration 002, edited in place); new `hazard_confirmations` table (migration 003). C-102 was split into C-115, C-102 and C-116.
 - **Decided:** design sections 4, 6 and 9 — including the direction rule (user's call) and the device foreign keys. Also: a `CHECK` lets "unknown" through, so a rule about an optional column must say `IS NOT NULL` itself; table tests start from a valid row and change one thing.

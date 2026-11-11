@@ -96,9 +96,15 @@ So each `event_tag` has a server-side policy entry:
 
 **Where the registry lives: in Go code, not in the database.** A single file
 (`internal/hazards/event_tags.go`) holds the table above. The API is the only writer of
-hazards, so the handler is the gatekeeper:
+hazards, so the code is the gatekeeper. The checks live in `hazards.ProcessReport`, the one
+function that stores a report, so no caller can skip them; the HTTP handler only turns its
+named errors into status codes:
 - unknown `event_tag` → `400 Bad Request`;
-- `event_tag` not allowed for the device's `device_type` → `403 Forbidden`.
+- `event_tag` not allowed for the device's `device_type` → `403 Forbidden`;
+- an `auto` report without a `confidence` between 0 and 1 → `400 Bad Request`.
+
+The handler itself checks only the shape of a request (readable JSON, required fields, number
+ranges, size).
 
 The deduplication query receives the tag's radius and time to live as query parameters, so it
 is still a single statement. Trade-off accepted: changing a value or adding a tag means a
@@ -681,6 +687,7 @@ been deployed, so no follow-up migration is needed; local databases are reset wi
 | Speed-based polling: `search_radius = lookahead_distance = poll_distance = speed × time_between_polls`, with a minimum, a maximum and a fallback timer | Section 5 |
 | Polling numbers are configuration, not architecture | Section 5 |
 | Each device confirms a hazard at most once; nearest match wins | Section 6 |
+| Business rules (tag known, tag allowed, confidence for `auto`) are enforced in `hazards.ProcessReport`; handlers check request shape and translate errors (C-102) | Section 4 |
 | Per-tag "direction matters": a report more than 135° off the hazard's heading is a different hazard (pothole, debris: yes; accident, checkpost: no); no heading → location only (user's call, C-115) | Sections 4 and 6 |
 | Expired hazards are kept; moved to a separate archive store at the end of the project, not deleted | Section 6 |
 | A revoked device's existing hazards stay until they expire | Section 6 |
