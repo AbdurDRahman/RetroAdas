@@ -13,3 +13,6 @@
 # Go test coverage output.
 *.out
 coverage.html
+
+# Personal command cheat sheet — local only, never shared.
+MY_COMMANDS.md
