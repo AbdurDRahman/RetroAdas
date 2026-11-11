@@ -19,6 +19,11 @@ Entry template:
 
 ---
 
+### C-116 Simultaneous reports — 2026-11-11 — `6637fc6`
+- **Changed:** `ProcessReport` takes a Postgres advisory lock for the report's tag before looking for a match; a test releases 8 reports of one new pothole at the same instant and expects 1 hazard with 8 confirmations.
+- **Decided:** design section 6. Also: a test for a timing problem must be seen failing — the first version passed by accident because opening connections staggered the reports, so transactions are now opened before the start signal; after the fix it was run 30 times in a row.
+- **Follow-ups:** — (C-105: one short transaction per report; C-106: request time limit; C-309: the finer lock)
+
 ### C-102 Deduplication on write (`ProcessReport`) — 2026-11-11 — `74de0a7`
 - **Changed:** `hazards.ProcessReport` refuses invalid reports with named errors, finds the nearest live match (same tag, the tag's radius, same direction where it matters), then creates, confirms or recognizes a repeat; 33 test cases.
 - **Decided:** design sections 4 and 6. Also: `ON CONFLICT DO NOTHING` on `hazard_confirmations` decides "new device or repeat" in one statement; inside one transaction `now()` never moves, so tests seed a hazard with a different expiry (1 hour) to see a reset; tests that pass at once were checked by breaking the query on purpose.

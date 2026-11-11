@@ -30,14 +30,6 @@ All Stage 0 tasks are done (see `DONE.md`).
 
 ## Stage 1 — Laptop (core API, all features, docker compose)
 
-### C-116 Simultaneous reports
-- **Goal:** two devices reporting the same hazard at the same instant give 1 hazard with 2 confirmations, not 2 hazards. (Split out of C-102.)
-- **Done when:** a test runs several reports of one hazard at the same moment, each in its own committed transaction, and finds exactly 1 row with `confirmations` equal to the number of devices.
-- **Touches:** `internal/hazards/deduplication*.go`.
-- **Depends on:** —
-- **Discuss:** the race between looking for a match and inserting — a Postgres advisory lock held for the transaction (per tag, or per tag and map cell), `SERIALIZABLE` with retries, or accept the rare duplicate.
-- **Who:** tbd
-
 ### C-103 Projected lookahead search (`FindNearby`)
 - **Goal:** return the live hazards ahead of the vehicle, using the agreed speed-based rule: `search_radius = lookahead_distance = poll_distance = speed × time_between_polls` (minimum lookahead distance, maximum search radius of 1 kilometre — see `docs/design.md`).
 - **Done when:** `hazards.FindNearby` is implemented; the server computes lookahead distance and search radius from `speed_kilometers_per_hour` (`SearchQuery.RadiusMeters` and the fixed `LookaheadDistanceMeters` are removed — the client never sends a radius); the response matches `docs/design.md` section 8 (`distance_meters` from the vehicle's current position, nearest first, at most 100, plus `next_poll`); `TestFindNearby` has real cases (hazard inside the search circle returned; hazard behind the car not returned; hazard outside the radius not returned; expired hazard not returned; results ordered by distance; slow speed uses the minimum lookahead distance).
@@ -56,7 +48,7 @@ All Stage 0 tasks are done (see `DONE.md`).
 
 ### C-105 HTTP layer
 - **Goal:** expose the three endpoints over HTTP with consistent authentication, validation and errors.
-- **Done when:** `POST /v1/devices/handshake`, `POST /v1/hazards`, `GET /v1/hazards` are routed in `cmd/server`; authentication middleware reads `X-Device-Id` / `X-Api-Key` (same as the k6 scripts) and calls `devices.Authenticate` with `configuration.APIKeyPepper`; status codes, bodies and the error shape follow `docs/design.md` section 8 (`created` → 201, `confirmed` / `already_reported` → 200; `source` derived from the device type); the `POST /v1/hazards` handler checks only the request's shape, builds a `hazards.Report` (optional fields as pointers; `ReportedBy` and `DeviceType` from authentication) and maps `ProcessReport`'s named errors: `ErrUnknownEventTag` → 400 `unknown_event_tag`, `ErrEventTagNotAllowed` → 403 `event_tag_not_allowed`, `ErrInvalidConfidence` → 400 `invalid_request`, anything else → 500; handler tests use `httptest`.
+- **Done when:** `POST /v1/devices/handshake`, `POST /v1/hazards`, `GET /v1/hazards` are routed in `cmd/server`; authentication middleware reads `X-Device-Id` / `X-Api-Key` (same as the k6 scripts) and calls `devices.Authenticate` with `configuration.APIKeyPepper`; status codes, bodies and the error shape follow `docs/design.md` section 8 (`created` → 201, `confirmed` / `already_reported` → 200; `source` derived from the device type); the `POST /v1/hazards` handler runs each report in **its own short transaction** (begin, `ProcessReport`, commit — nothing slow inside, because other reports of the same tag wait for it, C-116), checks only the request's shape, builds a `hazards.Report` (optional fields as pointers; `ReportedBy` and `DeviceType` from authentication) and maps `ProcessReport`'s named errors: `ErrUnknownEventTag` → 400 `unknown_event_tag`, `ErrEventTagNotAllowed` → 403 `event_tag_not_allowed`, `ErrInvalidConfidence` → 400 `invalid_request`, anything else → 500; handler tests use `httptest`.
 - **Touches:** `cmd/server/main.go`, new `internal/httpapi/` (or similar), core package signatures.
 - **Depends on:** C-102, C-103, C-104
 - **Discuss:** core functions currently take `*sql.Tx` — switch to a small `Querier` interface so handlers can pass `*sql.DB` or a transaction and tests keep using rollback transaction? Package name/layout for handlers. (Error shape decided in C-001.)
@@ -64,7 +56,7 @@ All Stage 0 tasks are done (see `DONE.md`).
 
 ### C-106 Server hardening
 - **Goal:** make the server behave well in a container and behind a load balancer.
-- **Done when:** read/write/idle timeouts set; graceful shutdown on SIGTERM; `GET /healthz` (process up) and `GET /readyz` (database ping); structured logs via `log/slog` (request ID, status, latency, no secrets, and **never coordinates together with a device ID** — `docs/design.md` section 7); request body size limit; every response carries `X-Instance-Id` (hostname by default — needed for the Stage 3 demo); database connection pool limits come from `config`; **connections are reused** (HTTP keep-alive / HTTP/2 idle timeout long enough to span the time between polls, so a vehicle pays the TLS handshake once, not every poll); **responses are gzip-compressed** when the client sends `Accept-Encoding: gzip` (list responses repeat every field name per hazard).
+- **Done when:** read/write/idle timeouts set; every request has a time limit that also cancels its database work, so a report stuck waiting for the tag lock (C-116) is cut off instead of piling up; graceful shutdown on SIGTERM; `GET /healthz` (process up) and `GET /readyz` (database ping); structured logs via `log/slog` (request ID, status, latency, no secrets, and **never coordinates together with a device ID** — `docs/design.md` section 7); request body size limit; every response carries `X-Instance-Id` (hostname by default — needed for the Stage 3 demo); database connection pool limits come from `config`; **connections are reused** (HTTP keep-alive / HTTP/2 idle timeout long enough to span the time between polls, so a vehicle pays the TLS handshake once, not every poll); **responses are gzip-compressed** when the client sends `Accept-Encoding: gzip` (list responses repeat every field name per hazard).
 - **Touches:** `cmd/server/main.go`, `config/config.go`, `.env.example`.
 - **Depends on:** C-105
 - **Discuss:** log format (JSON vs text); idle timeout value vs time between polls (a load balancer in front may impose its own); whether keep-alive / gzip are handled by the Go server or by the reverse proxy (Stage 2) / ingress (Stage 3) — likely both configured, proxy wins.
@@ -250,7 +242,7 @@ All Stage 0 tasks are done (see `DONE.md`).
 
 ### C-309 Future-work notes
 - **Goal:** record what we deliberately left out.
-- **Done when:** `docs/future-work.md` covers PgBouncer, read replicas, and anything else found along the way, each with a "when it would be needed" trigger based on our measured numbers.
+- **Done when:** `docs/future-work.md` covers PgBouncer, read replicas, a finer report lock (per tag and map cell, if one tag ever nears about 190 reports per second — `docs/design.md` section 6), and anything else found along the way, each with a "when it would be needed" trigger based on our measured numbers.
 - **Touches:** `docs/future-work.md`.
 - **Depends on:** C-308
 - **Discuss:** —

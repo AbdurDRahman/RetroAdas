@@ -227,6 +227,15 @@ lookahead distance is expected to cover it.
   deduplication radius in the last few minutes. Counting frames is fragile, because frame rate
   and speed vary. The server check stays as the safety net: clients can be buggy or malicious,
   and the same car passes the same pothole again on another drive.
+- **Simultaneous reports.** Two devices reporting the same new hazard at the same instant
+  could both look, both find nothing, and both create it. So a report takes a Postgres advisory
+  lock for its tag before looking, and holds it until its transaction ends: reports of one tag
+  are handled one at a time across every server, and the second report finds the first one's
+  hazard. Searches take no lock. Measured on the laptop: about 5 milliseconds per report, so
+  one tag handles roughly 190 reports per second, far above what the rate limit (section 10)
+  allows a realistic fleet to send. Each report must run in its own short transaction. If one
+  tag ever outgrows this, the lock becomes finer (per tag and map cell) inside the same
+  function, with no change to the API or the schema.
 - **Expiry is passive.** Expired hazards simply stop being returned by searches.
 - **Expired hazards are kept, not deleted.** For now they stay in `hazards`; searches skip them
   through the `expires_at` filter and index. At the end of the project they move to a separate
@@ -687,6 +696,7 @@ been deployed, so no follow-up migration is needed; local databases are reset wi
 | Speed-based polling: `search_radius = lookahead_distance = poll_distance = speed × time_between_polls`, with a minimum, a maximum and a fallback timer | Section 5 |
 | Polling numbers are configuration, not architecture | Section 5 |
 | Each device confirms a hazard at most once; nearest match wins | Section 6 |
+| Simultaneous reports: an advisory lock per tag for the length of the report's transaction; `SERIALIZABLE` with retries and "accept duplicates" rejected (C-116) | Section 6 |
 | Business rules (tag known, tag allowed, confidence for `auto`) are enforced in `hazards.ProcessReport`; handlers check request shape and translate errors (C-102) | Section 4 |
 | Per-tag "direction matters": a report more than 135° off the hazard's heading is a different hazard (pothole, debris: yes; accident, checkpost: no); no heading → location only (user's call, C-115) | Sections 4 and 6 |
 | Expired hazards are kept; moved to a separate archive store at the end of the project, not deleted | Section 6 |
