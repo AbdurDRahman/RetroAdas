@@ -7,10 +7,9 @@ import (
 )
 
 // TestFindNearby drives implementation of the projected lookahead search.
-// Build this after TestProcessReport is green — it depends on the same
-// seedHazard fixture. C-103 replaces these placeholders with the full case
-// list (hazard behind the vehicle, expired hazard, ordering, minimum
-// lookahead distance at slow speed).
+// C-103 replaces these placeholders with the full case list (hazard behind the
+// vehicle, expired hazard, ordering, minimum lookahead distance at slow
+// speed), using the seedHazard fixture from deduplication_test.go.
 func TestFindNearby(test *testing.T) {
 	test.Run("hazard sitting at the projected lookahead point is returned", func(test *testing.T) {
 		transaction := testdatabase.NewTransaction(test)
@@ -20,12 +19,12 @@ func TestFindNearby(test *testing.T) {
 		// ahead of a known (latitude, longitude, heading_degrees), then query
 		// FindNearby with that same (latitude, longitude, heading_degrees)
 		// and assert it comes back with a small distance_meters.
-		test.Skip("depends on seedHazard + ProcessReport being implemented first")
+		test.Skip("C-103: hazards.FindNearby is not written yet")
 	})
 
 	test.Run("hazard well outside radius_meters is not returned", func(test *testing.T) {
 		transaction := testdatabase.NewTransaction(test)
 		_ = transaction
-		test.Skip("depends on seedHazard + ProcessReport being implemented first")
+		test.Skip("C-103: hazards.FindNearby is not written yet")
 	})
 }
