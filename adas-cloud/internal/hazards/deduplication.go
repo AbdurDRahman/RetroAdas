@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"time"
 )
 
@@ -98,6 +99,13 @@ func ProcessReport(transaction *sql.Tx, report Report) (Outcome, error) {
 		return Outcome{}, err
 	}
 
+	// From here until the caller's transaction ends, this is the only report of
+	// this tag being processed, on any server. Without it, two reports of the
+	// same new hazard could both look, both find nothing, and both create it.
+	if err := waitForOtherReportsOfTag(transaction, eventTag); err != nil {
+		return Outcome{}, err
+	}
+
 	// Step 1: is this a hazard we already know?
 	matchedHazardID, found, err := findMatchingHazard(transaction, report, eventTag)
 	if err != nil {
@@ -111,6 +119,35 @@ func ProcessReport(transaction *sql.Tx, report Report) (Outcome, error) {
 
 	// Steps 3 and 4: it matched, so confirm it (or recognize a repeat).
 	return confirmHazard(transaction, matchedHazardID, report, eventTag)
+}
+
+// waitForOtherReportsOfTag takes a Postgres advisory lock for the tag (task
+// C-116). An advisory lock is a named lock that Postgres keeps for us; it
+// locks no table and no row, so searches are never slowed by it. If another
+// transaction holds the same lock, this call simply waits until that
+// transaction ends, and then the search in step 1 sees what it saved.
+//
+// "xact" means the lock belongs to the transaction: Postgres releases it
+// automatically on commit or rollback, so it can never be left behind.
+//
+// The caller must keep its transaction short (one report, then commit),
+// because every other report of this tag waits for it.
+func waitForOtherReportsOfTag(transaction *sql.Tx, eventTag EventTag) error {
+	_, err := transaction.Exec(`SELECT pg_advisory_xact_lock($1)`, advisoryLockKeyForTag(eventTag))
+	if err != nil {
+		return fmt.Errorf("wait for other reports of %q: %w", eventTag.Name, err)
+	}
+	return nil
+}
+
+// advisoryLockKeyForTag turns a tag name into the number Postgres identifies
+// the lock by: the same tag always gives the same number. The "hazard-report:"
+// prefix keeps these numbers apart from locks taken for other purposes (the
+// migration runner has one too).
+func advisoryLockKeyForTag(eventTag EventTag) int64 {
+	hasher := fnv.New64a()
+	hasher.Write([]byte("hazard-report:" + eventTag.Name))
+	return int64(hasher.Sum64())
 }
 
 // findMatchingHazard is step 1: it returns the id of the nearest live hazard
