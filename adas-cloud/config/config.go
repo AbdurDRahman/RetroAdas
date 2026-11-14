@@ -7,7 +7,12 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
+	"strconv"
+	"time"
+
+	"github.com/AbdurDRahman/RetroAdas/adas-cloud/internal/hazards"
 )
 
 // MinimumAPIKeyPepperLength is the shortest pepper the server accepts, in
@@ -32,6 +37,11 @@ type Config struct {
 	// (docs/design.md section 7). It must be identical on every replica, and
 	// changing it invalidates every device key. Never log it.
 	APIKeyPepper string
+
+	// PollingRules are the four numbers behind the search distance and the
+	// polling pace (docs/design.md section 5). Each has an optional
+	// environment variable; without it the agreed default applies.
+	PollingRules hazards.PollingRules
 }
 
 // Load reads the server's configuration from environment variables and fails
@@ -58,11 +68,72 @@ func Load() (*Config, error) {
 		serverPort = "8080"
 	}
 
+	pollingRules, err := loadPollingRules()
+	if err != nil {
+		return nil, err
+	}
+
 	return &Config{
 		DatabaseURL:  databaseURL,
 		ServerPort:   serverPort,
 		APIKeyPepper: apiKeyPepper,
+		PollingRules: pollingRules,
 	}, nil
+}
+
+// loadPollingRules starts from the defaults and replaces each number whose
+// environment variable is set, then checks that the result makes sense.
+func loadPollingRules() (hazards.PollingRules, error) {
+	pollingRules := hazards.DefaultPollingRules()
+
+	timeBetweenPollsSeconds, err := readOptionalNumber("TIME_BETWEEN_POLLS_SECONDS", pollingRules.TimeBetweenPolls.Seconds())
+	if err != nil {
+		return hazards.PollingRules{}, err
+	}
+	minimumLookaheadDistanceMeters, err := readOptionalNumber("MINIMUM_LOOKAHEAD_DISTANCE_METERS", pollingRules.MinimumLookaheadDistanceMeters)
+	if err != nil {
+		return hazards.PollingRules{}, err
+	}
+	maximumSearchRadiusMeters, err := readOptionalNumber("MAXIMUM_SEARCH_RADIUS_METERS", pollingRules.MaximumSearchRadiusMeters)
+	if err != nil {
+		return hazards.PollingRules{}, err
+	}
+	fallbackTimeSeconds, err := readOptionalNumber("FALLBACK_TIME_SECONDS", pollingRules.FallbackTime.Seconds())
+	if err != nil {
+		return hazards.PollingRules{}, err
+	}
+
+	pollingRules = hazards.PollingRules{
+		TimeBetweenPolls:               secondsToDuration(timeBetweenPollsSeconds),
+		MinimumLookaheadDistanceMeters: minimumLookaheadDistanceMeters,
+		MaximumSearchRadiusMeters:      maximumSearchRadiusMeters,
+		FallbackTime:                   secondsToDuration(fallbackTimeSeconds),
+	}
+	if err := pollingRules.Validate(); err != nil {
+		return hazards.PollingRules{}, fmt.Errorf("polling rules: %w", err)
+	}
+	return pollingRules, nil
+}
+
+// readOptionalNumber reads a number from an environment variable, or returns
+// defaultValue when the variable is not set.
+func readOptionalNumber(variableName string, defaultValue float64) (float64, error) {
+	text := os.Getenv(variableName)
+	if text == "" {
+		return defaultValue, nil
+	}
+	number, err := strconv.ParseFloat(text, 64)
+	// Go reads "NaN" and "Inf" as valid numbers. Neither is a usable setting.
+	if err != nil || math.IsNaN(number) || math.IsInf(number, 0) {
+		return 0, fmt.Errorf("%s must be a number, got %q", variableName, text)
+	}
+	return number, nil
+}
+
+// secondsToDuration turns a number of seconds, which may have decimals, into
+// Go's duration type.
+func secondsToDuration(seconds float64) time.Duration {
+	return time.Duration(seconds * float64(time.Second))
 }
 
 // LoadDatabaseURL reads only DATABASE_URL. It is for programs that talk to the

@@ -11,10 +11,6 @@ import (
 	"time"
 )
 
-// errNotImplemented is what the placeholder functions in this package return
-// until their task (C-102, C-103) writes them.
-var errNotImplemented = errors.New("not implemented")
-
 // The reasons ProcessReport refuses a report. They are named values so the
 // HTTP handler (C-105) can tell them apart with errors.Is and answer with the
 // right status code, as agreed in docs/design.md section 8.

@@ -83,6 +83,19 @@ func LookUpEventTag(name string) (EventTag, bool) {
 	return EventTag{}, false
 }
 
+// eventTagNamesWhereDirectionMatters lists the tags whose hazards sit on one
+// side of the road. The search hands this list to its query, so the registry
+// stays the one place that says which tags they are.
+func eventTagNamesWhereDirectionMatters() []string {
+	var names []string
+	for _, eventTag := range eventTagRegistry {
+		if eventTag.DirectionMatters {
+			names = append(names, eventTag.Name)
+		}
+	}
+	return names
+}
+
 // AllowsDeviceType reports whether a device of the given type may report this tag.
 func (eventTag EventTag) AllowsDeviceType(deviceType string) bool {
 	return slices.Contains(eventTag.AllowedDeviceTypes, deviceType)
