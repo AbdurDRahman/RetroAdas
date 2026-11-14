@@ -1,5 +1,13 @@
 # Feature 3: Automatic Crash/Accident Detection (IMU-Based)
 
+> **Status (Nov 2026):** this is the original spec. Work lives in
+> [`adas-automatic-crash-detection/`](../adas-automatic-crash-detection/) —
+> start with its `handover.md`. Several open questions below are now
+> decided: compute is an **independent ESP32** (so it works during Sentry
+> Mode), and emergency contact goes **through the Jetson** (a stub is fine
+> for now). Still open: false-positive target, own-hardware calibration,
+> and auto-posting to the hazards table.
+
 > **Note:** This feature does not currently appear anywhere in the title
 > defense deck (system diagrams, domains, or KPIs). It's a strong addition,
 > but it needs to be integrated into the architecture and team ownership
