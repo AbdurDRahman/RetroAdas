@@ -135,7 +135,7 @@ Test 3's `OR: peak ‖A‖g ∨ tilt≥60°` combines the two signals as a hard 
 Observations:
 
 - w=0 is peak ‖A‖g alone (Test 2's numbers, restated as recall@FPR-cap). Adding tilt at w≈1–1.5 lifts recall by 12–17 points at 1–2% FPR (45.6%→~60%, 62.0%→~75%) without giving any of it back at 5% FPR. This is the opposite conclusion from the hard-OR combination: tilt *does* carry usable information about a crash, just not as a separate veto — it needs to be added into the decision, not OR'd on top of it.
-- This sweep picks both `w` and the operating threshold on the same test split it's scored against, so treat these numbers as *evidence a weighted combination beats G alone*, not as calibrated production constants — re-fit `w` (and re-check it doesn't just track this dataset's sensor quirks) once real calibration data is collected, per the open item in `CLAUDE.md`.
+- This sweep picks both `w` and the operating threshold on the same test split it's scored against, so treat these numbers as *evidence a weighted combination beats G alone*, not as calibrated production constants — re-fit `w` (and re-check it doesn't just track this dataset's sensor quirks) once real calibration data is collected, per the open item in `handover.md`.
 - This still says nothing about genuine rollovers specifically — the underlying data limitation from Test 3 (rollovers are rare/absent in this split) doesn't go away just because the combination method changed. The α≈0.99, ≥70–80° rollover branch from Test 3 should stay as a separate OR-condition alongside this score, not be replaced by it.
 
 ## Test 4 — consecutive-delta + GPS speed drop (`delta_speed_update`)
@@ -166,4 +166,4 @@ Observations:
 - Ungated sample-to-sample delta is a slightly *worse* discriminator than peak ‖A‖g (Test 2): ~77% vs ~87% crash recall at 5% FPR. An impact spike at 100 Hz is only a sample or two wide, so the delta mostly re-measures the peak with extra noise. The delta threshold is also data-rate dependent (fewer samples per impact at 52 Hz → larger deltas) — re-sweep on-device.
 - The same-second gate (as written in the C code) *loses* recall at equal FPR: the GPS fix at the start of the impact second predates the impact. The +2 s lookahead gate is the right shape and adds ~10 points of recall at 1–2% FPR over ungated delta, but still trails peak ‖A‖g alone.
 - The gate can't separate crashes from near-misses because 99% of near_miss events also show a ≥10 km/h drop within 2 s — hard braking is what makes them near-misses. It only prunes normal-driving events (69% of which drop ≥10 km/h somewhere in the clip anyway).
-- No strategy fixes the fundamental overlap: the ~10–20% of crash events with peaks under 2 G look like hard braking to every rule here.
+- No strategy fixes the fundamental overlap: the ~10–20% of crash events with peaks under ~2.5–3 G (Test 2 table) look like hard braking to every rule here.

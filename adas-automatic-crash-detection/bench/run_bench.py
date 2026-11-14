@@ -332,7 +332,7 @@ def section_test3b(res: Results) -> str:
              "combination beats G alone*, not as calibrated production constants — "
              "re-fit `w` (and re-check it doesn't just track this dataset's sensor "
              "quirks) once real calibration data is collected, per the open item in "
-             "`CLAUDE.md`.",
+             "`handover.md`.",
              "- This still says nothing about genuine rollovers specifically — the "
              "underlying data limitation from Test 3 (rollovers are rare/absent in "
              "this split) doesn't go away just because the combination method changed. "
@@ -417,7 +417,7 @@ def section_test4(res: Results) -> str:
              "them near-misses. It only prunes normal-driving events (69% of which drop "
              "≥10 km/h somewhere in the clip anyway).",
              "- No strategy fixes the fundamental overlap: the ~10–20% of crash events "
-             "with peaks under 2 G look like hard braking to every rule here.",
+             "with peaks under ~2.5–3 G (Test 2 table) look like hard braking to every rule here.",
              ""]
     return "\n".join(lines)
 
