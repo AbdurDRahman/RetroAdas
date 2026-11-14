@@ -1,0 +1,8 @@
+# Python packages for bench/export_events.py and bench/run_bench.py
+# (pandas is only for exploring the data by hand).
+# Versions are the ones results.md was generated with.
+numpy==2.4.6
+pandas==3.0.5
+pyarrow==25.0.1
+# only needed to download the VZCrash dataset (see README.md)
+huggingface_hub
