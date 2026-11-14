@@ -184,9 +184,51 @@ the response".)
   applies; when stopped, the fallback timer applies.*
 - The "1 km broadcast radius" becomes a maximum, not a fixed radius.
 
-**Known limitations (later refinement, not MVP):** a circle also catches parallel roads and the
-opposite carriageway, and doesn't follow curves. A heading cone or a route corridor would fix
-this.
+**Known limitation of the circle:** it looks along a straight line, so where the road bends
+it lands off the road — it catches hazards on parallel roads and misses the ones around the
+bend. "Following the road" below is the answer; the circle stays as its fallback.
+
+**Later refinement, if warnings ever arrive late:** grow the circle (lookahead distance and
+search radius about 1.25 × the poll distance) rather than shifting it forward, which would
+leave the stretch right in front of the vehicle unsearched after a turn.
+
+### Following the road: approach trails — agreed in outline (C-117 … C-119)
+
+The server can only follow a road if it knows the road's shape. A map could tell it; here the
+vehicles do.
+
+- **Devices keep a breadcrumb trail:** their own recent GPS points, about the last kilometer.
+- **A report or confirmation carries that trail.** The server stores it as an *approach path*:
+  a line that ends at the hazard and shows how a vehicle reached it.
+- **A device that only drives past a known hazard can add its trail too,** without confirming
+  it (user's call). A Jetson can't confirm a checkpost, and a phone on foot has no trail, but
+  every vehicle that passes can show one more way of reaching the hazard. It does not count as
+  a confirmation and does not reset the expiry.
+- **Searching:** a hazard is "on your road" when one of its approach paths passes through the
+  vehicle's position in the vehicle's direction of travel — someone who was here, going this
+  way, reached that hazard. Its distance is measured along the path, so it is the real driving
+  distance, not the straight line.
+- **The straight-ahead circle stays as the fallback** for hazards that have no approach path
+  yet (a first report from someone on foot, for example).
+
+What this gives: results follow any curve, and parallel roads, the opposite carriageway and
+bridges overhead drop out, with no map data and no extra service. What it costs: coverage
+grows with traffic (a road nobody has reported from yet relies on the fallback), devices must
+record breadcrumbs, and a trail is location history (section 7).
+
+Still to settle, each in its task: the trail's length and point spacing; how close "passes
+through" must be; how many paths to keep per hazard; whether a hazard that has paths, none of
+them matching, is still returned by the fallback.
+
+**Testing** uses real road geometry: a stretch of the M-2 motorway through the Salt Range
+(curves, two carriageways) taken from OpenStreetMap, with demo trails and hazards placed on it
+and polls from different positions.
+
+**Rejected for now:** map matching (snapping vehicles to OpenStreetMap roads with a matching
+engine such as Valhalla, then walking the road network ahead). It is the mainstream approach,
+but it adds map data and a second service to every stage, and the road-walking is still our
+own code. It stays possible later, on top of the trails. A route sent by the phone's
+navigation was also rejected: it never works for the Jetson.
 
 **Checked during C-103:** whether a GPS heading is trustworthy at very low speed. The minimum
 lookahead distance is expected to cover it.
@@ -319,6 +361,10 @@ a leaked database alone is worthless.
 - Client certificates (mutual TLS) for Jetson units — strongest, since the secret never crosses
   the network, but needs a certificate authority, rotation and ingress configuration.
 
+**Approach paths are location history too** (section 5): the last kilometer or so before a
+hazard. They are stored **without the device's identity and without times**, and only as
+long as the hazard itself.
+
 **Location privacy.** Because reads are authenticated, every poll links a device to a position
 — a movement trail every time between polls. `GET` writes nothing to the database, so the
 trail could only exist in logs. **Rule for Stages 2 and 3:** never log coordinates together
@@ -433,6 +479,10 @@ Response — the same shape every time; `status` says what happened:
 | `created` | `201` | A new hazard. |
 | `confirmed` | `200` | Matched an existing hazard: `confirmations` went up and the expiry was reset. |
 | `already_reported` | `200` | This device already reported or confirmed this hazard; nothing changed (section 6). |
+
+**Planned (C-117):** an optional `approach_path` in the request — the device's recent
+positions, oldest first, ending at the reported position (section 5). **Planned (C-119):** an
+endpoint that lets a device passing a known hazard add its approach path to it.
 
 Errors: `400` (`invalid_request`, `unknown_event_tag`), `401`, `403` (`device_revoked`,
 `event_tag_not_allowed`), `413`, `429`.
@@ -577,6 +627,9 @@ and slower index inserts for no security gain. `GENERATED ALWAYS AS IDENTITY` is
 to `devices`, so a hazard can never name a device that doesn't exist. Devices are revoked,
 never deleted, so the link never blocks anything.
 
+**Planned (C-117): `hazard_approach_paths`** — one row per stored approach path: the hazard
+and a line of points ending at it. No device ID and no times (section 7).
+
 **Deliberately not stored:** an `event_tags` table (the registry is Go code, section 4); poll
 locations (privacy, section 7); the archive of expired hazards (later, C-307).
 
@@ -694,6 +747,9 @@ been deployed, so no follow-up migration is needed; local databases are reset wi
 | Starting tags: `accident`, `pothole`, `checkpost`, `debris`, with their time to live, deduplication radius and allowed device types | Section 4 |
 | `confidence` is the detector score for `auto` reports and null for `manual` ones, enforced by a check constraint; no default confidence | Section 4 |
 | Speed-based polling: `search_radius = lookahead_distance = poll_distance = speed × time_between_polls`, with a minimum, a maximum and a fallback timer | Section 5 |
+| Lookahead distance stays equal to the search radius; shifting the circle forward (1.25 ×) was considered and rejected because it leaves the stretch in front of the vehicle unsearched after a turn; growing the circle is the option if warnings arrive late | Section 5 |
+| Following curved roads: approach trails sent with reports, confirmations and by passing vehicles; a hazard is on your road when one of its paths passes your position in your direction; the circle stays as the fallback; map matching rejected for now (user's call to solve this now, and to let passing vehicles add trails) | Section 5 |
+| Approach paths are stored without device identity or times | Section 7 |
 | Polling numbers are configuration, not architecture | Section 5 |
 | Each device confirms a hazard at most once; nearest match wins | Section 6 |
 | Simultaneous reports: an advisory lock per tag for the length of the report's transaction; `SERIALIZABLE` with retries and "accept duplicates" rejected (C-116) | Section 6 |

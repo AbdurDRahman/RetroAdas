@@ -30,12 +30,50 @@ All Stage 0 tasks are done (see `DONE.md`).
 
 ## Stage 1 — Laptop (core API, all features, docker compose)
 
-### C-103 Projected lookahead search (`FindNearby`)
-- **Goal:** return the live hazards ahead of the vehicle, using the agreed speed-based rule: `search_radius = lookahead_distance = poll_distance = speed × time_between_polls` (minimum lookahead distance, maximum search radius of 1 kilometre — see `docs/design.md`).
-- **Done when:** `hazards.FindNearby` is implemented; the server computes lookahead distance and search radius from `speed_kilometers_per_hour` (`SearchQuery.RadiusMeters` and the fixed `LookaheadDistanceMeters` are removed — the client never sends a radius); the response matches `docs/design.md` section 8 (`distance_meters` from the vehicle's current position, nearest first, at most 100, plus `next_poll`); `TestFindNearby` has real cases (hazard inside the search circle returned; hazard behind the car not returned; hazard outside the radius not returned; expired hazard not returned; results ordered by distance; slow speed uses the minimum lookahead distance).
-- **Touches:** `internal/hazards/nearby_search*.go`, `config/` (time between polls, minimum lookahead distance, maximum search radius).
+### C-103 Straight-ahead search (`FindNearby`)
+- **Goal:** return the live hazards ahead of the vehicle with the agreed speed-based rule (`docs/design.md` section 5). This circle later becomes the fallback of the road-following search (C-118).
+- **Done when:**
+  - a pure calculation turns a speed into the lookahead distance, search radius and poll distance (equal; minimum 150 meters; maximum 1 kilometer), tested without a database against the table in the design;
+  - `hazards.FindNearby` returns the live hazards inside the circle, nearest first, at most 100, each with `distance_meters` from the vehicle's current position, plus the next poll distance and the fallback time (`docs/design.md` section 8); `SearchQuery.RadiusMeters` and the fixed `LookaheadDistanceMeters` are removed;
+  - **direction filter:** for tags where direction matters, only hazards whose heading is within `hazards.MaximumSameDirectionHeadingDifferenceDegrees` of the vehicle's are returned; hazards without a heading and tags that don't use direction go to everyone;
+  - **slow vehicles:** below 5 kilometers per hour the heading is not trusted — the search is a circle of the minimum distance centered on the vehicle, with no direction filter;
+  - the four polling numbers (time between polls, minimum lookahead distance, maximum search radius, fallback time) are a "polling rules" value passed into the search, with the agreed defaults and optional environment variables in `config/`;
+  - tests place hazards at exact positions with PostGIS (100 meters ahead returned; 50 meters behind not; 390 meters ahead returned and 410 not, at 60 kilometers per hour; expired not returned; nearest first; the direction and slow-vehicle rules).
+- **Touches:** `internal/hazards/nearby_search*.go`, `config/`, `.env.example`.
 - **Depends on:** —
-- **Discuss:** **direction filter** — since C-102 a tag where direction matters can have one hazard per direction at the same spot, so the search should return only hazards whose heading is within 135° of the vehicle's (reuse `hazards.MaximumSameDirectionHeadingDifferenceDegrees` and the heading-difference expression from `findMatchingHazard`) (hazards without a heading, and tags that don't use direction, go to everyone); otherwise a driver gets two warnings for one pothole. How to test "hazard behind the car" reliably near the minimum lookahead distance. (Result limit and no client radius decided in C-001.)
+- **Discuss:** — (settled 2026-11-14; the example in design section 8 shows a poll distance of 158 meters at 38 kilometers per hour, which should be 150 — fix when closing)
+- **Who:** claude
+
+### C-117 Approach trails on reports
+- **Goal:** a report or confirmation can carry the device's recent positions, stored as an approach path to the hazard (`docs/design.md` section 5, "Following the road").
+- **Done when:** `hazards.Report` has an optional approach path (positions oldest first, ending at the reported position); `ProcessReport` validates it and stores it for a new hazard and for a confirmation; a new migration creates `hazard_approach_paths` (the hazard and a line, no device ID, no times); a limit on paths per hazard is enforced; a report without a path works exactly as before; tests cover all of it.
+- **Touches:** `internal/hazards/deduplication*.go`, a new migration, `database/*_test.go`, `docs/design.md`.
+- **Depends on:** C-103
+- **Discuss:** the trail's length (about 1 kilometer?) and point spacing (about 25 meters?); the most points accepted; what makes a path invalid (does not end near the report, jumps between points, too long); how many paths to keep per hazard and which to drop; whether an `already_reported` repeat may still add a path; the JSON shape of a point.
+- **Who:** tbd
+
+### C-118 Road-following search
+- **Goal:** the search returns hazards on the road the vehicle is actually driving, around curves, and leaves out parallel roads and the opposite carriageway.
+- **Done when:** `FindNearby` returns a hazard when one of its approach paths passes through the vehicle's position in its direction of travel, with the distance measured along the path; the straight-ahead circle (C-103) remains the fallback; a response says which of the two matched each hazard; test data is a stretch of the M-2 motorway through the Salt Range taken from OpenStreetMap (with its attribution), with demo trails and hazards, and polls from both carriageways, from before and after curves, and from a nearby road.
+- **Touches:** `internal/hazards/nearby_search*.go`, test data under `internal/hazards/testdata/`, `docs/design.md`.
+- **Depends on:** C-117
+- **Discuss:** how close "passes through" must be (about 20 meters?) and how far the directions may differ; how far ahead along a path to return hazards; **whether a hazard that has paths, none of them matching this vehicle, is still returned by the fallback** (safer but noisier) or left out (cleaner but can miss a real hazard on a road nobody reported from); how the test data is extracted and kept small.
+- **Who:** tbd
+
+### C-119 Approach trails from passing vehicles
+- **Goal:** a device that drives past a known hazard can add its trail to it, so every way of reaching the hazard gets covered quickly — also by devices that may not report that tag, and for hazards first reported without a trail.
+- **Done when:** a core function (and its endpoint, with C-105) accepts a hazard ID and an approach path from an authenticated device; the path must end near that hazard; it adds no confirmation and does not reset the expiry; the per-hazard limit from C-117 applies; tests cover it.
+- **Touches:** `internal/hazards/`, handlers, `docs/design.md` section 8.
+- **Depends on:** C-117, C-105 (for the endpoint)
+- **Discuss:** the endpoint's shape; a rate limit; how a device decides it has "passed" a hazard; whether devices need the hazard's own position to decide (they already receive it).
+- **Who:** tbd
+
+### C-120 Device contract for approach trails
+- **Goal:** the Jetson code and the mobile app record breadcrumbs and send them, in the form the server expects.
+- **Done when:** a short contract is written and handed to the owners of the Jetson code and the app: how often to record a position, how many to keep, when to send them (with a report, and after passing a hazard), and the JSON shape; the feature spec (`../features/feature-2-crowdsourced-hazards.md`) describes the capability.
+- **Touches:** `../features/feature-2-crowdsourced-hazards.md`, a note for the device owners.
+- **Depends on:** C-117, C-119
+- **Discuss:** —
 - **Who:** tbd
 
 ### C-104 Handshake
@@ -48,7 +86,7 @@ All Stage 0 tasks are done (see `DONE.md`).
 
 ### C-105 HTTP layer
 - **Goal:** expose the three endpoints over HTTP with consistent authentication, validation and errors.
-- **Done when:** `POST /v1/devices/handshake`, `POST /v1/hazards`, `GET /v1/hazards` are routed in `cmd/server`; authentication middleware reads `X-Device-Id` / `X-Api-Key` (same as the k6 scripts) and calls `devices.Authenticate` with `configuration.APIKeyPepper`; status codes, bodies and the error shape follow `docs/design.md` section 8 (`created` → 201, `confirmed` / `already_reported` → 200; `source` derived from the device type); the `POST /v1/hazards` handler runs each report in **its own short transaction** (begin, `ProcessReport`, commit — nothing slow inside, because other reports of the same tag wait for it, C-116), checks only the request's shape, builds a `hazards.Report` (optional fields as pointers; `ReportedBy` and `DeviceType` from authentication) and maps `ProcessReport`'s named errors: `ErrUnknownEventTag` → 400 `unknown_event_tag`, `ErrEventTagNotAllowed` → 403 `event_tag_not_allowed`, `ErrInvalidConfidence` → 400 `invalid_request`, anything else → 500; handler tests use `httptest`.
+- **Done when:** `POST /v1/devices/handshake`, `POST /v1/hazards` (including the optional approach path from C-117), `GET /v1/hazards` are routed in `cmd/server`; authentication middleware reads `X-Device-Id` / `X-Api-Key` (same as the k6 scripts) and calls `devices.Authenticate` with `configuration.APIKeyPepper`; status codes, bodies and the error shape follow `docs/design.md` section 8 (`created` → 201, `confirmed` / `already_reported` → 200; `source` derived from the device type); the `POST /v1/hazards` handler runs each report in **its own short transaction** (begin, `ProcessReport`, commit — nothing slow inside, because other reports of the same tag wait for it, C-116), checks only the request's shape, builds a `hazards.Report` (optional fields as pointers; `ReportedBy` and `DeviceType` from authentication) and maps `ProcessReport`'s named errors: `ErrUnknownEventTag` → 400 `unknown_event_tag`, `ErrEventTagNotAllowed` → 403 `event_tag_not_allowed`, `ErrInvalidConfidence` → 400 `invalid_request`, anything else → 500; handler tests use `httptest`.
 - **Touches:** `cmd/server/main.go`, new `internal/httpapi/` (or similar), core package signatures.
 - **Depends on:** C-102, C-103, C-104
 - **Discuss:** core functions currently take `*sql.Tx` — switch to a small `Querier` interface so handlers can pass `*sql.DB` or a transaction and tests keep using rollback transaction? Package name/layout for handlers. (Error shape decided in C-001.)
