@@ -230,8 +230,17 @@ but it adds map data and a second service to every stage, and the road-walking i
 own code. It stays possible later, on top of the trails. A route sent by the phone's
 navigation was also rejected: it never works for the Jetson.
 
-**Checked during C-103:** whether a GPS heading is trustworthy at very low speed. The minimum
-lookahead distance is expected to cover it.
+**What the straight-ahead search returns (C-103):**
+- the live hazards inside the circle, nearest first, at most 100 (section 8);
+- **only the vehicle's own direction:** for a tag where direction matters (section 4), a hazard
+  whose stored heading differs from the vehicle's by more than the 135° of section 6 is left
+  out. Hazards without a heading, and tags that don't use direction, go to everyone;
+- **slow vehicles:** below 5 kilometers per hour a positioning receiver's heading can't be
+  trusted (it is worked out from movement). The search then uses a circle of the minimum
+  distance centered on the vehicle itself, with no direction filter.
+
+The four polling numbers each have an optional environment variable (listed in
+`.env.example`); the server refuses to start on values that make no sense.
 
 ---
 
@@ -247,8 +256,8 @@ lookahead distance is expected to cover it.
   and a phone compass can be off by 20 to 30°, so 135° leaves a margin on both sides; a car
   joining from a side road (about 90°) still matches. When the report or the hazard has no
   heading, only location counts. Consequence: on an undivided road one pothole can be stored
-  once per direction, so the search should return a driver only their own direction's hazards
-  (decided in C-103).
+  once per direction, so the search returns a driver only their own direction's hazards
+  (section 5).
 - **A confirmation is from an independent device.** Each device counts at most once per hazard.
   A device re-reporting a hazard it already reported or confirmed changes nothing: no extra
   confirmation and no expiry reset. (Bug found in the drafts; fixed in C-102.)
@@ -513,7 +522,7 @@ Response `200 OK`:
     }
   ],
   "next_poll": {
-    "poll_distance_meters": 158,
+    "poll_distance_meters": 150,
     "fallback_seconds": 60
   }
 }
@@ -751,6 +760,7 @@ been deployed, so no follow-up migration is needed; local databases are reset wi
 | Following curved roads: approach trails sent with reports, confirmations and by passing vehicles; a hazard is on your road when one of its paths passes your position in your direction; the circle stays as the fallback; map matching rejected for now (user's call to solve this now, and to let passing vehicles add trails) | Section 5 |
 | Approach paths are stored without device identity or times | Section 7 |
 | Polling numbers are configuration, not architecture | Section 5 |
+| The search returns only the vehicle's own direction for tags where direction matters; below 5 kilometers per hour the heading is not trusted, so the circle is centered on the vehicle with no direction filter (C-103) | Section 5 |
 | Each device confirms a hazard at most once; nearest match wins | Section 6 |
 | Simultaneous reports: an advisory lock per tag for the length of the report's transaction; `SERIALIZABLE` with retries and "accept duplicates" rejected (C-116) | Section 6 |
 | Business rules (tag known, tag allowed, confidence for `auto`) are enforced in `hazards.ProcessReport`; handlers check request shape and translate errors (C-102) | Section 4 |

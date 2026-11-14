@@ -30,25 +30,11 @@ All Stage 0 tasks are done (see `DONE.md`).
 
 ## Stage 1 — Laptop (core API, all features, docker compose)
 
-### C-103 Straight-ahead search (`FindNearby`)
-- **Goal:** return the live hazards ahead of the vehicle with the agreed speed-based rule (`docs/design.md` section 5). This circle later becomes the fallback of the road-following search (C-118).
-- **Done when:**
-  - a pure calculation turns a speed into the lookahead distance, search radius and poll distance (equal; minimum 150 meters; maximum 1 kilometer), tested without a database against the table in the design;
-  - `hazards.FindNearby` returns the live hazards inside the circle, nearest first, at most 100, each with `distance_meters` from the vehicle's current position, plus the next poll distance and the fallback time (`docs/design.md` section 8); `SearchQuery.RadiusMeters` and the fixed `LookaheadDistanceMeters` are removed;
-  - **direction filter:** for tags where direction matters, only hazards whose heading is within `hazards.MaximumSameDirectionHeadingDifferenceDegrees` of the vehicle's are returned; hazards without a heading and tags that don't use direction go to everyone;
-  - **slow vehicles:** below 5 kilometers per hour the heading is not trusted — the search is a circle of the minimum distance centered on the vehicle, with no direction filter;
-  - the four polling numbers (time between polls, minimum lookahead distance, maximum search radius, fallback time) are a "polling rules" value passed into the search, with the agreed defaults and optional environment variables in `config/`;
-  - tests place hazards at exact positions with PostGIS (100 meters ahead returned; 50 meters behind not; 390 meters ahead returned and 410 not, at 60 kilometers per hour; expired not returned; nearest first; the direction and slow-vehicle rules).
-- **Touches:** `internal/hazards/nearby_search*.go`, `config/`, `.env.example`.
-- **Depends on:** —
-- **Discuss:** — (settled 2026-11-14; the example in design section 8 shows a poll distance of 158 meters at 38 kilometers per hour, which should be 150 — fix when closing)
-- **Who:** claude
-
 ### C-117 Approach trails on reports
 - **Goal:** a report or confirmation can carry the device's recent positions, stored as an approach path to the hazard (`docs/design.md` section 5, "Following the road").
 - **Done when:** `hazards.Report` has an optional approach path (positions oldest first, ending at the reported position); `ProcessReport` validates it and stores it for a new hazard and for a confirmation; a new migration creates `hazard_approach_paths` (the hazard and a line, no device ID, no times); a limit on paths per hazard is enforced; a report without a path works exactly as before; tests cover all of it.
 - **Touches:** `internal/hazards/deduplication*.go`, a new migration, `database/*_test.go`, `docs/design.md`.
-- **Depends on:** C-103
+- **Depends on:** —
 - **Discuss:** the trail's length (about 1 kilometer?) and point spacing (about 25 meters?); the most points accepted; what makes a path invalid (does not end near the report, jumps between points, too long); how many paths to keep per hazard and which to drop; whether an `already_reported` repeat may still add a path; the JSON shape of a point.
 - **Who:** tbd
 
@@ -86,9 +72,9 @@ All Stage 0 tasks are done (see `DONE.md`).
 
 ### C-105 HTTP layer
 - **Goal:** expose the three endpoints over HTTP with consistent authentication, validation and errors.
-- **Done when:** `POST /v1/devices/handshake`, `POST /v1/hazards` (including the optional approach path from C-117), `GET /v1/hazards` are routed in `cmd/server`; authentication middleware reads `X-Device-Id` / `X-Api-Key` (same as the k6 scripts) and calls `devices.Authenticate` with `configuration.APIKeyPepper`; status codes, bodies and the error shape follow `docs/design.md` section 8 (`created` → 201, `confirmed` / `already_reported` → 200; `source` derived from the device type); the `POST /v1/hazards` handler runs each report in **its own short transaction** (begin, `ProcessReport`, commit — nothing slow inside, because other reports of the same tag wait for it, C-116), checks only the request's shape, builds a `hazards.Report` (optional fields as pointers; `ReportedBy` and `DeviceType` from authentication) and maps `ProcessReport`'s named errors: `ErrUnknownEventTag` → 400 `unknown_event_tag`, `ErrEventTagNotAllowed` → 403 `event_tag_not_allowed`, `ErrInvalidConfidence` → 400 `invalid_request`, anything else → 500; handler tests use `httptest`.
+- **Done when:** `POST /v1/devices/handshake`, `POST /v1/hazards` (including the optional approach path from C-117), `GET /v1/hazards` are routed in `cmd/server`; authentication middleware reads `X-Device-Id` / `X-Api-Key` (same as the k6 scripts) and calls `devices.Authenticate` with `configuration.APIKeyPepper`; status codes, bodies and the error shape follow `docs/design.md` section 8 (`created` → 201, `confirmed` / `already_reported` → 200; `source` derived from the device type); the `POST /v1/hazards` handler runs each report in **its own short transaction** (begin, `ProcessReport`, commit — nothing slow inside, because other reports of the same tag wait for it, C-116), checks only the request's shape, builds a `hazards.Report` (optional fields as pointers; `ReportedBy` and `DeviceType` from authentication) and maps `ProcessReport`'s named errors: `ErrUnknownEventTag` → 400 `unknown_event_tag`, `ErrEventTagNotAllowed` → 403 `event_tag_not_allowed`, `ErrInvalidConfidence` → 400 `invalid_request`, anything else → 500; the `GET /v1/hazards` handler refuses a missing, non-numeric, not-a-number or out-of-range latitude, longitude, heading or speed with `400 invalid_request`, calls `hazards.FindNearby` with `configuration.PollingRules`, and writes `distance_meters` and `poll_distance_meters` as whole meters; handler tests use `httptest`.
 - **Touches:** `cmd/server/main.go`, new `internal/httpapi/` (or similar), core package signatures.
-- **Depends on:** C-102, C-103, C-104
+- **Depends on:** C-104
 - **Discuss:** core functions currently take `*sql.Tx` — switch to a small `Querier` interface so handlers can pass `*sql.DB` or a transaction and tests keep using rollback transaction? Package name/layout for handlers. (Error shape decided in C-001.)
 - **Who:** tbd
 

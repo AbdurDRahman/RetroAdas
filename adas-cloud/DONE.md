@@ -19,6 +19,11 @@ Entry template:
 
 ---
 
+### C-103 Straight-ahead search (`FindNearby`) — 2026-11-15 — `a1dc792`
+- **Changed:** `hazards.FindNearby` returns the live hazards in the circle ahead (nearest first, at most 100, own direction only, a centered circle below 5 kilometers per hour) with the next poll values; `hazards.PollingRules` with defaults, validation and four optional environment variables in `config/`.
+- **Decided:** design section 5. Also: the lookahead distance, search radius and poll distance are equal today but each has its own method and variable (user's call); PostGIS needs `::double precision` on parameters passed to `ST_Project`; an empty tag list must be `[]string{}`, because `nil` reaches Postgres as unknown and leaves the direction filter on; steps are one behaviour with failing tests first, not one query clause.
+- **Follow-ups:** — (C-105 gained the query checks, passing the polling rules, and whole-meter rounding; C-118 builds on this search)
+
 ### C-116 Simultaneous reports — 2026-11-11 — `6637fc6`
 - **Changed:** `ProcessReport` takes a Postgres advisory lock for the report's tag before looking for a match; a test releases 8 reports of one new pothole at the same instant and expects 1 hazard with 8 confirmations.
 - **Decided:** design section 6. Also: a test for a timing problem must be seen failing — the first version passed by accident because opening connections staggered the reports, so transactions are now opened before the start signal; after the fix it was run 30 times in a row.
