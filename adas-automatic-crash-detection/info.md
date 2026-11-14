@@ -2,6 +2,11 @@
 
 > Working notes compiled from research/discussion for RetroADAS Feature 3
 > (Automatic Crash/Accident Detection). Supplements `feature-3-crash-detection.md`.
+>
+> **Thresholds here are from the literature, not calibrated.** Benchmarking
+> on VZCrash (`results.md`) showed the 5/20/40 G bands do not work on ±8 g
+> telematics IMUs — the working detection threshold is ~2.5–3.5 G. Check
+> `results.md` before using any number below.
 
 ## Two-Layer Detection Model
 
@@ -189,8 +194,9 @@ this project's IMU is configured to.
 
 ---
 
+## Why two sets of references
 
-**The resolution — two separate literatures, not one paper stretched thin:**
+**Two separate literatures, not one paper stretched thin:**
 1. Braking/near-miss layer/pothole → Pranoto et al. (empirically validated on real,
    safe driving data).
 2. Impact/rollover layer → Ibrahim et al. / Razali et al. / Chikaka & Longe
@@ -198,8 +204,9 @@ this project's IMU is configured to.
    standardized crash-test literature, not from live crash experiments).
 
 
-**Datasets identified 
- **VZCrash** (Verizon Connect, 2026) — Hugging Face
+## Calibration dataset
+
+- **VZCrash** (Verizon Connect, 2026) — Hugging Face
   (huggingface.co/datasets/vzc-research-chapter/VZCrash), ~190,000 events
   incl. 31,090 verified crashes, 100 Hz tri-axial accel (g) + gyro (deg/s).
   Access-gated (must accept terms). Companion paper: arXiv:2606.06074
@@ -219,7 +226,9 @@ this project's IMU is configured to.
   (integration point with Feature 2, still needs confirmation per original
   doc's open questions).
 
-- Emergency contact mechanism: sends signal to the bigger device jetson ( that uploads it onto cloud , also contacts emergency can be a dummy function or some simple api call)
+- Emergency contact mechanism: the ESP32 signals the Jetson, which uploads
+  the event to the cloud and contacts emergency services/contacts. For now
+  that contact step can be a dummy function or a simple API call.
 
 - False-positive rate target — not yet quantified; to be defined once
   real calibration data is collected.
