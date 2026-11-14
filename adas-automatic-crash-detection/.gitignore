@@ -3,3 +3,7 @@ data/
 __pycache__/
 *.pyc
 build/
+
+# Claude Code assistant files — kept local, not shared
+CLAUDE.md
+.claude/
