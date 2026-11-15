@@ -216,9 +216,49 @@ bridges overhead drop out, with no map data and no extra service. What it costs:
 grows with traffic (a road nobody has reported from yet relies on the fallback), devices must
 record breadcrumbs, and a trail is location history (section 7).
 
-Still to settle, each in its task: the trail's length and point spacing; how close "passes
-through" must be; how many paths to keep per hazard; whether a hazard that has paths, none of
-them matching, is still returned by the fallback.
+**The trail a device records (agreed in C-117; the device contract is C-120).** A point is
+recorded every 25 meters driven, and also whenever the heading has changed by more than 30°
+since the last point, so a sharp street corner keeps its shape (user's call). A trail holds
+about the last kilometer. After a positioning gap the device starts a new trail, and with
+fewer than 2 points it sends none.
+
+**What the server accepts.** All of these are tunable constants, not architecture:
+
+| Limit | Value |
+|---|---|
+| Most points in one trail | 80 |
+| Longest trail | 1,200 meters |
+| Shortest trail | 50 meters |
+| Trail's last point to the reported position | at most 50 meters |
+| Gap between two neighbouring points | at most 200 meters |
+| A new trail is "the same route" as a stored path when it stays this close to it along its whole length | 15 meters |
+| Paths kept per hazard | 8 |
+| Paths one device may add to one hazard | 2 |
+
+- The server adds the reported position as the path's final point, so a path always ends at
+  the report.
+- **A report with an invalid trail is refused whole** (`400 invalid_request`). An honest
+  device following the contract never sends one, and the refusal makes a device with broken
+  trail code visible at once (user's call; keeping the report and dropping the trail was the
+  alternative).
+- **A trail on a route the hazard already has stores nothing**, and does not count against the
+  device's 2. Without this, traffic on the main road would push out the one trail from a side
+  road.
+- When a hazard has 8 paths and a new route arrives, the oldest path is dropped.
+- A repeat report (`already_reported`) may still add a trail: the same device arriving by
+  another road shows a new approach. It adds no confirmation and resets no expiry.
+- **One device adds at most 2 paths to one hazard** (user's call), so a single device cannot
+  fill all 8. The count is kept after a path is dropped.
+
+**Paths are compared as lines of straight segments** between the recorded points, never point
+by point: two vehicles on one road record their points at different places. Smooth
+interpolation between points was considered and rejected: with this recording rule a straight
+segment is at most about 2 meters from the real curve, far inside the positioning error, and a
+fitted curve can bulge outside a sharp corner. If curves ever look too coarse, the device
+records more points.
+
+Still to settle in C-118: how close "passes through" must be; whether a hazard that has paths,
+none of them matching, is still returned by the fallback.
 
 **Testing** uses real road geometry: a stretch of the M-2 motorway through the Salt Range
 (curves, two carriageways) taken from OpenStreetMap, with demo trails and hazards placed on it
@@ -373,6 +413,10 @@ a leaked database alone is worthless.
 **Approach paths are location history too** (section 5): the last kilometer or so before a
 hazard. They are stored **without the device's identity and without times**, and only as
 long as the hazard itself.
+To limit each device to 2 paths per hazard, a separate table counts how many paths a device
+has added to a hazard. It never says which paths, so a stored path still cannot be traced to a
+device. It reveals only that the device was near that hazard, which `hazard_confirmations`
+already records for reporters.
 
 **Location privacy.** Because reads are authenticated, every poll links a device to a position
 — a movement trail every time between polls. `GET` writes nothing to the database, so the
@@ -489,8 +533,19 @@ Response — the same shape every time; `status` says what happened:
 | `confirmed` | `200` | Matched an existing hazard: `confirmations` went up and the expiry was reset. |
 | `already_reported` | `200` | This device already reported or confirmed this hazard; nothing changed (section 6). |
 
-**Planned (C-117):** an optional `approach_path` in the request — the device's recent
-positions, oldest first, ending at the reported position (section 5). **Planned (C-119):** an
+**Optional `approach_path` (C-117; reaches HTTP with C-105)** — the device's recent
+positions, oldest first (rules in section 5):
+
+```json
+"approach_path": [
+  {"latitude": 32.7011, "longitude": 72.9342},
+  {"latitude": 32.7013, "longitude": 72.9344}
+]
+```
+
+An invalid trail refuses the whole report with `400 invalid_request`. The response gains
+`approach_path_stored` (true or false): false when the report had no trail, when the hazard
+already has that route, and when the device has already added its 2 paths. **Planned (C-119):** an
 endpoint that lets a device passing a known hazard add its approach path to it.
 
 Errors: `400` (`invalid_request`, `unknown_event_tag`), `401`, `403` (`device_revoked`,
@@ -636,8 +691,10 @@ and slower index inserts for no security gain. `GENERATED ALWAYS AS IDENTITY` is
 to `devices`, so a hazard can never name a device that doesn't exist. Devices are revoked,
 never deleted, so the link never blocks anything.
 
-**Planned (C-117): `hazard_approach_paths`** — one row per stored approach path: the hazard
-and a line of points ending at it. No device ID and no times (section 7).
+**`hazard_approach_paths`** (C-117) — one row per stored approach path: an id, the hazard and
+a line of points ending at it. No device ID and no times (section 7); "oldest" is the lowest
+id. **`hazard_approach_path_counts`** — how many paths each device has added to each hazard,
+for the limit of 2 (section 5).
 
 **Deliberately not stored:** an `event_tags` table (the registry is Go code, section 4); poll
 locations (privacy, section 7); the archive of expired hazards (later, C-307).
@@ -759,6 +816,10 @@ been deployed, so no follow-up migration is needed; local databases are reset wi
 | Lookahead distance stays equal to the search radius; shifting the circle forward (1.25 ×) was considered and rejected because it leaves the stretch in front of the vehicle unsearched after a turn; growing the circle is the option if warnings arrive late | Section 5 |
 | Following curved roads: approach trails sent with reports, confirmations and by passing vehicles; a hazard is on your road when one of its paths passes your position in your direction; the circle stays as the fallback; map matching rejected for now (user's call to solve this now, and to let passing vehicles add trails) | Section 5 |
 | Approach paths are stored without device identity or times | Section 7 |
+| Trails: a point every 25 meters and on a heading change over 30°; the server's limits (80 points, 1,200 meters, 8 paths per hazard and the rest) are tunable constants (C-117; the extra points on turns are the user's call) | Section 5 |
+| A report with an invalid trail is refused whole; a trail on a route the hazard already has stores nothing; the oldest path is dropped when a hazard is full (C-117) | Section 5 |
+| One device adds at most 2 paths to one hazard, counted in a separate table so path rows stay anonymous (user's call, C-117) | Sections 5 and 7 |
+| Paths are lines of straight segments compared as lines; smooth interpolation rejected (C-117) | Section 5 |
 | Polling numbers are configuration, not architecture | Section 5 |
 | The search returns only the vehicle's own direction for tags where direction matters; below 5 kilometers per hour the heading is not trusted, so the circle is centered on the vehicle with no direction filter (C-103) | Section 5 |
 | Each device confirms a hazard at most once; nearest match wins | Section 6 |

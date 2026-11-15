@@ -19,6 +19,11 @@ Entry template:
 
 ---
 
+### C-117 Approach trails on reports — 2026-11-15 — `7c5a153`, `5d372ea`
+- **Changed:** a report can carry a trail; `ProcessReport` refuses an invalid one whole (`ErrInvalidApproachPath`) and stores a valid one as an approach path of the hazard, unless the hazard already has that route or the device has added its 2; migration 004 adds `hazard_approach_paths` and `hazard_approach_path_counts`.
+- **Decided:** design sections 5 and 7. Also: PostGIS measures the trail, so there is one measure of distance; the same-route check cuts the new trail every 10 meters (`ST_Segmentize`) and compares lines; the device's count is one `INSERT ... ON CONFLICT DO UPDATE ... WHERE` statement, refused when no row changes; a test pins the path table's exact columns so a device or time column can't be added by accident; when a new test only fails to compile, add the missing field alone and run it again to see it fail on behaviour.
+- **Follow-ups:** — (C-105 maps the new error and returns `approach_path_stored`; C-119 gained the note about simultaneous additions)
+
 ### C-103 Straight-ahead search (`FindNearby`) — 2026-11-15 — `a1dc792`
 - **Changed:** `hazards.FindNearby` returns the live hazards in the circle ahead (nearest first, at most 100, own direction only, a centered circle below 5 kilometers per hour) with the next poll values; `hazards.PollingRules` with defaults, validation and four optional environment variables in `config/`.
 - **Decided:** design section 5. Also: the lookahead distance, search radius and poll distance are equal today but each has its own method and variable (user's call); PostGIS needs `::double precision` on parameters passed to `ST_Project`; an empty tag list must be `[]string{}`, because `nil` reaches Postgres as unknown and leaves the direction filter on; steps are one behaviour with failing tests first, not one query clause.
