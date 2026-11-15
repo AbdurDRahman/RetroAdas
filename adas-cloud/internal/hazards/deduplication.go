@@ -61,6 +61,10 @@ type Report struct {
 	// request body: a client can't choose who it is or what kind of device it is.
 	ReportedBy string
 	DeviceType string
+
+	// ApproachPath is optional: the device's recent positions, oldest first
+	// (docs/design.md section 5). Empty means the report carries no trail.
+	ApproachPath []Position
 }
 
 // Outcome is what ProcessReport returns for an accepted report, matching the
@@ -70,12 +74,19 @@ type Outcome struct {
 	Status        string // StatusCreated | StatusConfirmed | StatusAlreadyReported
 	Confirmations int
 	ExpiresAt     time.Time
+
+	// ApproachPathStored says whether the report's trail was stored as a new
+	// approach path of the hazard. False when the report carried no trail,
+	// when the hazard already has that route, and when this device has
+	// already added its share of paths to this hazard.
+	ApproachPathStored bool
 }
 
 // ProcessReport implements deduplication-on-write. The rules are in
 // docs/design.md section 6; in short:
 //  0. Refuse a report with an unknown tag, a tag this device type may not
-//     report, or (for a detector) no valid confidence.
+//     report, (for a detector) no valid confidence, or a trail that breaks a
+//     limit.
 //  1. Find the nearest live hazard with the same event_tag inside that tag's
 //     deduplication radius, travelling the same way when direction matters.
 //  2. None found: insert a new hazard (confirmations start at 1, and the
@@ -85,6 +96,9 @@ type Outcome struct {
 //     -> StatusConfirmed.
 //  4. Found, and this device already reported it: change nothing
 //     -> StatusAlreadyReported.
+//  5. If the report carries a trail, store it as an approach path of the
+//     hazard, unless the hazard already has that route or the device has
+//     added its share (section 5).
 //
 // location is intentionally NOT updated on confirmation — the original
 // report's coordinates stay authoritative, to avoid drift across many reports.
@@ -93,6 +107,14 @@ func ProcessReport(transaction *sql.Tx, report Report) (Outcome, error) {
 	eventTag, source, err := checkReport(report)
 	if err != nil {
 		return Outcome{}, err
+	}
+
+	// The trail's distances are measured by PostGIS, which only reads. It runs
+	// before the lock below, so a refused report never makes another one wait.
+	if len(report.ApproachPath) > 0 {
+		if err := checkApproachPathDistances(transaction, report); err != nil {
+			return Outcome{}, err
+		}
 	}
 
 	// From here until the caller's transaction ends, this is the only report of
@@ -108,13 +130,29 @@ func ProcessReport(transaction *sql.Tx, report Report) (Outcome, error) {
 		return Outcome{}, err
 	}
 
-	// Step 2: nothing matched, so this report becomes a new hazard.
+	var outcome Outcome
 	if !found {
-		return createHazard(transaction, report, eventTag, source)
+		// Step 2: nothing matched, so this report becomes a new hazard.
+		outcome, err = createHazard(transaction, report, eventTag, source)
+	} else {
+		// Steps 3 and 4: it matched, so confirm it (or recognize a repeat).
+		outcome, err = confirmHazard(transaction, matchedHazardID, report, eventTag)
+	}
+	if err != nil {
+		return Outcome{}, err
 	}
 
-	// Steps 3 and 4: it matched, so confirm it (or recognize a repeat).
-	return confirmHazard(transaction, matchedHazardID, report, eventTag)
+	// Step 5: the trail, if there is one. It is stored in all three cases,
+	// also for a repeat: the same device arriving again still shows a way of
+	// reaching the hazard.
+	if len(report.ApproachPath) == 0 {
+		return outcome, nil
+	}
+	outcome.ApproachPathStored, err = addApproachPath(transaction, outcome.ID, report)
+	if err != nil {
+		return Outcome{}, err
+	}
+	return outcome, nil
 }
 
 // waitForOtherReportsOfTag takes a Postgres advisory lock for the tag (task
@@ -319,6 +357,13 @@ func checkReport(report Report) (EventTag, string, error) {
 	// with or without one; either way none is stored.
 	if source == SourceAuto && !isValidConfidence(report.Confidence) {
 		return EventTag{}, "", ErrInvalidConfidence
+	}
+
+	// A report without a trail is fine; a trail must have the right shape.
+	if len(report.ApproachPath) > 0 {
+		if err := checkApproachPathShape(report.ApproachPath); err != nil {
+			return EventTag{}, "", err
+		}
 	}
 
 	return eventTag, source, nil
