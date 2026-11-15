@@ -63,6 +63,11 @@ right row get matched?) against a real Postgres+PostGIS instance via
 `database/testdatabase`, not mocks — PostGIS geography math is exactly the kind
 of thing you don't want to fake.
 
+The road-following search is also tested on a real road: about 5 kilometers of
+the M-2 motorway through the Salt Range, in `internal/hazards/testdata/`. That
+map data is © OpenStreetMap contributors, under the Open Database License
+(details in `internal/hazards/testdata/README.md`).
+
 **k6 scripts (`load-tests/k6/`)** — black-box simulation of real device
 traffic against the deployed API, standing in for hardware that doesn't
 exist yet:
@@ -155,6 +160,7 @@ build, and the tests against a real PostGIS database.
 ## Current state
 
 Stage 0 (foundations) is done: the design is agreed, the database runs in
-Docker, and migrations work. No endpoint is implemented yet. The tests for
-unwritten features are skipped, each naming the task that will write it;
-`TASKS.md` lists what remains and `DONE.md` what is finished.
+Docker, and migrations work. Stage 1 is in progress: the core functions exist
+and are tested (device authentication, processing a report, searching for
+hazards along the road), but no endpoint is served over HTTP yet. `TASKS.md`
+lists what remains and `DONE.md` what is finished.

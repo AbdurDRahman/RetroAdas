@@ -19,6 +19,11 @@ Entry template:
 
 ---
 
+### C-118 Road-following search — 2026-11-15 — `d5ceba9`, `9532592`
+- **Changed:** `FindNearby` also returns hazards whose approach path passes the vehicle in its direction of travel, with the distance by road; every hazard is marked `road` or `straight_ahead`; tests on drawn shapes and on 5 kilometers of the M-2 through the Salt Range (`internal/hazards/testdata/`, from OpenStreetMap).
+- **Decided:** design section 5 (no limit on the distance along a path and returning hazards whose paths don't match are the user's calls). Also: on the real bends the circle alone missed the pothole at 3 of 6 places and the paths found it at all 6, within 2 meters by road; no mapped road runs beside that stretch, so the parallel-road case moved to C-121; a service road still matches for its first 60 meters, while it is within 20 meters of the motorway; one test may not open a second transaction while the first holds a tag's lock (the run hangs); tests that passed at once were checked by breaking the code on purpose.
+- **Follow-ups:** C-121 (parallel road, tight hairpin); C-105 returns `matched_by`; C-120 gained the "each answer replaces the list" rule
+
 ### C-117 Approach trails on reports — 2026-11-15 — `7c5a153`, `5d372ea`
 - **Changed:** a report can carry a trail; `ProcessReport` refuses an invalid one whole (`ErrInvalidApproachPath`) and stores a valid one as an approach path of the hazard, unless the hazard already has that route or the device has added its 2; migration 004 adds `hazard_approach_paths` and `hazard_approach_path_counts`.
 - **Decided:** design sections 5 and 7. Also: PostGIS measures the trail, so there is one measure of distance; the same-route check cuts the new trail every 10 meters (`ST_Segmentize`) and compares lines; the device's count is one `INSERT ... ON CONFLICT DO UPDATE ... WHERE` statement, refused when no row changes; a test pins the path table's exact columns so a device or time column can't be added by accident; when a new test only fails to compile, add the missing field alone and run it again to see it fail on behaviour.

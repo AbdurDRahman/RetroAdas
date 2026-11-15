@@ -257,8 +257,38 @@ segment is at most about 2 meters from the real curve, far inside the positionin
 fitted curve can bulge outside a sharp corner. If curves ever look too coarse, the device
 records more points.
 
-Still to settle in C-118: how close "passes through" must be; whether a hazard that has paths,
-none of them matching, is still returned by the fallback.
+**How the road-following search matches (agreed in C-118).** The numbers are tunable
+constants:
+
+| Rule | Value |
+|---|---|
+| A path "passes through" the vehicle's position when it comes this close | 20 meters |
+| The vehicle's heading and the path's direction at that place differ by at most | 60° |
+
+- The direction limit is much tighter than the 135° of section 6 on purpose: a path's direction
+  comes from its line and is accurate, so only the vehicle's compass error has to fit. 60°
+  keeps a crossing road and oncoming traffic out.
+- **There is no limit on how far along a path the hazard may be** (user's call). The circle
+  needs one, because a bigger circle catches more that is not on the vehicle's road. A path
+  match means someone drove from here to that hazard, and a path is at most 1,200 meters long.
+  The driver hears earlier, and a missed poll costs nothing.
+- **The server never says "safe now".** It remembers nothing about a vehicle; every answer is
+  the full list for the position it was sent. A vehicle that leaves the road before the hazard
+  simply no longer gets it at its next poll, so a device must replace its list with each
+  answer (device contract, C-120).
+- **For a road match, direction is judged by the path, not by the hazard's stored heading.**
+  On a winding road the hazard's heading can differ from the vehicle's current one by any
+  amount.
+- A hazard's distance is measured along the path from the vehicle's place on it to the path's
+  end. If several of its paths match, the shortest distance is used.
+- **A hazard whose paths don't match this vehicle is still returned by the circle** (user's
+  call), and every hazard in the answer says how it was found: `road` or `straight_ahead`. A
+  device can announce a `road` match firmly and a `straight_ahead` match more softly. Leaving
+  such a hazard out would miss a vehicle arriving by a road nobody has recorded yet, and an
+  accident seen from the opposite carriageway. The cost: a vehicle on a parallel road still
+  gets the hazard, marked `straight_ahead`.
+- A hazard found both ways counts as `road`.
+- Below 5 kilometers per hour the heading isn't trusted, so only the centered circle is used.
 
 **Testing** uses real road geometry: a stretch of the M-2 motorway through the Salt Range
 (curves, two carriageways) taken from OpenStreetMap, with demo trails and hazards placed on it
@@ -573,7 +603,8 @@ Response `200 OK`:
       "longitude": 73.0490,
       "distance_meters": 95,
       "confidence": 0.91,
-      "confirmations": 4
+      "confirmations": 4,
+      "matched_by": "road"
     }
   ],
   "next_poll": {
@@ -584,7 +615,10 @@ Response `200 OK`:
 ```
 
 - `distance_meters` — whole meters from the vehicle's **current position** (not the projected
-  point), so the device can say "pothole in 95 meters".
+  point), so the device can say "pothole in 95 meters". For a `road` match it is the distance
+  along the road.
+- `matched_by` (C-118) — `road` when one of the hazard's approach paths passes the vehicle in
+  its direction of travel, otherwise `straight_ahead` (section 5).
 - Nearest first, **at most 100 hazards**.
 - `confidence` is null for manual reports.
 - `next_poll` — poll again after driving `poll_distance_meters`, or after `fallback_seconds`,
@@ -820,6 +854,8 @@ been deployed, so no follow-up migration is needed; local databases are reset wi
 | A report with an invalid trail is refused whole; a trail on a route the hazard already has stores nothing; the oldest path is dropped when a hazard is full (C-117) | Section 5 |
 | One device adds at most 2 paths to one hazard, counted in a separate table so path rows stay anonymous (user's call, C-117) | Sections 5 and 7 |
 | Paths are lines of straight segments compared as lines; smooth interpolation rejected (C-117) | Section 5 |
+| Road-following search: a path within 20 meters, heading within 60° of the path's direction, distance measured along the path with no limit on it (user's call; a limit of twice the lookahead distance was dropped); direction judged by the path, not the hazard's heading (C-118) | Section 5 |
+| A hazard whose paths don't match the vehicle is still returned by the circle; each hazard carries `matched_by` (`road` or `straight_ahead`) (user's call, C-118) | Sections 5 and 8 |
 | Polling numbers are configuration, not architecture | Section 5 |
 | The search returns only the vehicle's own direction for tags where direction matters; below 5 kilometers per hour the heading is not trusted, so the circle is centered on the vehicle with no direction filter (C-103) | Section 5 |
 | Each device confirms a hazard at most once; nearest match wins | Section 6 |
