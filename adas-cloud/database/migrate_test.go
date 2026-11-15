@@ -21,6 +21,7 @@ var expectedMigrationFileNames = []string{
 	"001_create_devices_table.sql",
 	"002_create_hazards_table.sql",
 	"003_create_hazard_confirmations_table.sql",
+	"004_create_hazard_approach_paths_tables.sql",
 }
 
 func TestMigrateAppliesEveryFileToAnEmptyDatabaseThenNothing(test *testing.T) {
