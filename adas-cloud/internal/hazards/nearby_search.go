@@ -1,8 +1,10 @@
 package hazards
 
 import (
+	"cmp"
 	"database/sql"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/lib/pq"
@@ -41,7 +43,20 @@ type NearbyHazard struct {
 	// Confidence is the detector's score. It is nil for a person's report.
 	Confidence    *float64
 	Confirmations int
+	// MatchedBy says how the search found this hazard: MatchedByRoad or
+	// MatchedByStraightAhead.
+	MatchedBy string
 }
+
+// How a search found a hazard (docs/design.md section 5).
+const (
+	// MatchedByRoad: one of the hazard's approach paths passes the vehicle in
+	// its direction of travel. The hazard is on the vehicle's road.
+	MatchedByRoad = "road"
+	// MatchedByStraightAhead: the hazard lies inside the circle ahead of the
+	// vehicle. It may be on another road.
+	MatchedByStraightAhead = "straight_ahead"
+)
 
 // SearchResult is the answer to a search.
 type SearchResult struct {
@@ -56,31 +71,90 @@ type SearchResult struct {
 }
 
 // FindNearby returns the live hazards ahead of the vehicle (docs/design.md
-// section 5). The search is a circle whose center lies one lookahead distance
-// ahead of the vehicle and whose radius is that same distance, so it covers
-// the road from the vehicle to twice the lookahead distance ahead, and nothing
-// behind.
+// section 5). It looks in two ways and joins the results:
+//
+//   - along the road: hazards whose approach paths pass the vehicle in its
+//     direction of travel (road_following_search.go). These follow curves.
+//   - straight ahead: hazards inside a circle ahead of the vehicle. This finds
+//     hazards that have no matching path yet.
+//
+// A vehicle that is nearly standing still gets only a circle around itself,
+// without any direction rule, because its heading can't be trusted.
+func FindNearby(transaction *sql.Tx, pollingRules PollingRules, searchQuery SearchQuery) (SearchResult, error) {
+	vehicleIsSlow := searchQuery.SpeedKilometersPerHour < MinimumSpeedForTrustedHeadingKilometersPerHour
+
+	hazardsStraightAhead, err := findHazardsStraightAhead(transaction, pollingRules, searchQuery, vehicleIsSlow)
+	if err != nil {
+		return SearchResult{}, err
+	}
+
+	// Following a road needs to know which way the vehicle is going along it.
+	var hazardsOnRoad []NearbyHazard
+	if !vehicleIsSlow {
+		hazardsOnRoad, err = findHazardsOnRoad(transaction, searchQuery)
+		if err != nil {
+			return SearchResult{}, err
+		}
+	}
+
+	return SearchResult{
+		Hazards:                joinSearchResults(hazardsOnRoad, hazardsStraightAhead),
+		NextPollDistanceMeters: pollingRules.PollDistanceMeters(searchQuery.SpeedKilometersPerHour),
+		FallbackTime:           pollingRules.FallbackTime,
+	}, nil
+}
+
+// joinSearchResults makes one list of the two searches: nearest first, at most
+// MaximumHazardsPerSearch. A hazard found both ways is kept once, as the road
+// match, because the distance by road is the real one.
+func joinSearchResults(hazardsOnRoad []NearbyHazard, hazardsStraightAhead []NearbyHazard) []NearbyHazard {
+	foundOnRoad := map[int64]bool{}
+	for _, hazard := range hazardsOnRoad {
+		foundOnRoad[hazard.ID] = true
+	}
+
+	joined := slices.Clone(hazardsOnRoad)
+	for _, hazard := range hazardsStraightAhead {
+		if !foundOnRoad[hazard.ID] {
+			joined = append(joined, hazard)
+		}
+	}
+
+	// Nearest first. The id settles two hazards at the same distance, so the
+	// same search always gives the same order.
+	slices.SortFunc(joined, func(first NearbyHazard, second NearbyHazard) int {
+		return cmp.Or(
+			cmp.Compare(first.DistanceMeters, second.DistanceMeters),
+			cmp.Compare(first.ID, second.ID),
+		)
+	})
+	if len(joined) > MaximumHazardsPerSearch {
+		joined = joined[:MaximumHazardsPerSearch]
+	}
+	return joined
+}
+
+// findHazardsStraightAhead is the circle search. The circle's center lies one
+// lookahead distance ahead of the vehicle and its radius is the search radius,
+// so it covers from the vehicle to twice the lookahead distance ahead, and
+// nothing behind.
 //
 // Hazards on the other side of the road are left out: for tags where direction
 // matters, a hazard recorded by traffic driving the opposite way is not this
 // vehicle's hazard.
-//
-// A vehicle that is nearly standing still gets a circle around itself instead,
-// without the direction rule, because its heading can't be trusted.
-func FindNearby(transaction *sql.Tx, pollingRules PollingRules, searchQuery SearchQuery) (SearchResult, error) {
-	// Three distances, each with its own name. The design makes them equal
+func findHazardsStraightAhead(transaction *sql.Tx, pollingRules PollingRules, searchQuery SearchQuery, vehicleIsSlow bool) ([]NearbyHazard, error) {
+	// Two distances, each with its own name. The design makes them equal
 	// today (section 5), but they mean different things.
 	lookaheadDistanceMeters := pollingRules.LookaheadDistanceMeters(searchQuery.SpeedKilometersPerHour)
 	searchRadiusMeters := pollingRules.SearchRadiusMeters(searchQuery.SpeedKilometersPerHour)
-	pollDistanceMeters := pollingRules.PollDistanceMeters(searchQuery.SpeedKilometersPerHour)
 
 	// The normal search applies the direction rule to the tags that use it.
 	eventTagNamesToFilterByDirection := eventTagNamesWhereDirectionMatters()
 
 	// A slow vehicle does not look ahead: the circle stays on the vehicle
-	// itself, and no tag is filtered by direction. The radius and the poll
-	// distance are left as they are (at this speed, the minimum).
-	if searchQuery.SpeedKilometersPerHour < MinimumSpeedForTrustedHeadingKilometersPerHour {
+	// itself, and no tag is filtered by direction. The radius is left as it is
+	// (at this speed, the minimum).
+	if vehicleIsSlow {
 		lookaheadDistanceMeters = 0
 		// An empty list, not nil: nil would reach Postgres as "unknown" and
 		// the direction rule would quietly stay on.
@@ -114,8 +188,6 @@ func FindNearby(transaction *sql.Tx, pollingRules PollingRules, searchQuery Sear
 		     OR hazards.heading_degrees IS NULL
 		     OR 180 - abs(abs(hazards.heading_degrees - $4::double precision) - 180) <= $7::double precision
 		   )
-		 -- Nearest first. The id settles two hazards at the same distance, so
-		 -- the same search always gives the same order.
 		 ORDER BY distance_meters, hazards.id
 		 LIMIT $5`,
 		searchQuery.Longitude, searchQuery.Latitude, searchRadiusMeters, searchQuery.HeadingDegrees,
@@ -124,27 +196,30 @@ func FindNearby(transaction *sql.Tx, pollingRules PollingRules, searchQuery Sear
 		lookaheadDistanceMeters,
 	)
 	if err != nil {
-		return SearchResult{}, fmt.Errorf("search for hazards: %w", err)
+		return nil, fmt.Errorf("search for hazards straight ahead: %w", err)
 	}
+	return readNearbyHazards(rows, MatchedByStraightAhead)
+}
+
+// readNearbyHazards turns the rows of either search into hazards, and marks
+// each with how it was found. Both searches select the same seven columns.
+func readNearbyHazards(rows *sql.Rows, matchedBy string) ([]NearbyHazard, error) {
 	defer rows.Close()
 
-	searchResult := SearchResult{
-		NextPollDistanceMeters: pollDistanceMeters,
-		FallbackTime:           pollingRules.FallbackTime,
-	}
+	var nearbyHazards []NearbyHazard
 	for rows.Next() {
-		var hazard NearbyHazard
+		hazard := NearbyHazard{MatchedBy: matchedBy}
 		err := rows.Scan(&hazard.ID, &hazard.EventTag, &hazard.Latitude, &hazard.Longitude,
 			&hazard.DistanceMeters, &hazard.Confidence, &hazard.Confirmations)
 		if err != nil {
-			return SearchResult{}, fmt.Errorf("read a hazard from the search: %w", err)
+			return nil, fmt.Errorf("read a hazard from the search: %w", err)
 		}
-		searchResult.Hazards = append(searchResult.Hazards, hazard)
+		nearbyHazards = append(nearbyHazards, hazard)
 	}
 	// rows.Next also stops when the connection breaks halfway. Without this
 	// check a broken search would look like a short, successful one.
 	if err := rows.Err(); err != nil {
-		return SearchResult{}, fmt.Errorf("read the search's hazards: %w", err)
+		return nil, fmt.Errorf("read the search's hazards: %w", err)
 	}
-	return searchResult, nil
+	return nearbyHazards, nil
 }

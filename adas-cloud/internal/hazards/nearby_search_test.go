@@ -337,3 +337,377 @@ func TestFindNearbySearchesAroundASlowVehicle(test *testing.T) {
 		})
 	}
 }
+
+// --- fixtures for the road-following search ---
+
+// The road in these tests turns: from 100 meters behind the vehicle it runs
+// straight on (140 degrees) to a corner 100 meters ahead, turns right (230
+// degrees) and reaches the hazard 290 meters after the corner.
+//
+//	behind ---- vehicle ---- corner
+//	                           |
+//	                           |
+//	                         hazard
+//
+// By road the hazard is 390 meters ahead, inside the 400 meter reach at 60
+// kilometers per hour. In a straight line it is far off to the right, outside
+// the circle. So only the road-following search can find it.
+type roadWithACorner struct {
+	path           []hazards.Position
+	hazardPosition hazards.Position
+}
+
+func buildRoadWithACorner(test *testing.T, transaction *sql.Tx) roadWithACorner {
+	test.Helper()
+	vehiclePosition := hazards.Position{Latitude: vehicleLatitude, Longitude: vehicleLongitude}
+	corner := positionFrom(test, transaction, vehiclePosition, 100, vehicleHeadingDegrees)
+	hazardPosition := positionFrom(test, transaction, corner, 290, 230)
+	return roadWithACorner{
+		path: []hazards.Position{
+			positionFrom(test, transaction, vehiclePosition, 100, behindVehicleDegrees),
+			corner,
+			positionFrom(test, transaction, corner, 100, 230),
+			positionFrom(test, transaction, corner, 200, 230),
+			hazardPosition,
+		},
+		hazardPosition: hazardPosition,
+	}
+}
+
+// seedPotholeAt places a live pothole at a position. Its heading is the
+// direction of the road's last stretch (230 degrees), as its reporter drove it.
+func seedPotholeAt(test *testing.T, transaction *sql.Tx, position hazards.Position) int64 {
+	test.Helper()
+	return seedHazard(test, transaction, seededHazard{
+		EventTag:       "pothole",
+		Latitude:       position.Latitude,
+		Longitude:      position.Longitude,
+		HeadingDegrees: pointerTo(230),
+		ReportedBy:     jetsonDeviceID,
+		ExpiresIn:      time.Hour,
+	})
+}
+
+// --- tests for the road-following search ---
+
+// The reason approach paths exist (docs/design.md section 5): a hazard around
+// a corner is found because a path leads from the vehicle to it, and its
+// distance is the distance by road.
+func TestFindNearbyFollowsTheRoadAroundACorner(test *testing.T) {
+	test.Run("with an approach path the hazard is found, 390 meters by road", func(test *testing.T) {
+		transaction := testdatabase.NewTransaction(test)
+		seedDevice(test, transaction, jetsonDeviceID, devices.DeviceTypeJetsonUnit)
+		road := buildRoadWithACorner(test, transaction)
+		hazardID := seedPotholeAt(test, transaction, road.hazardPosition)
+		seedApproachPath(test, transaction, hazardID, road.path)
+
+		searchResult, err := hazards.FindNearby(transaction, searchTestPollingRules, vehicleSearchQuery(60))
+
+		require.NoError(test, err)
+		require.Equal(test, 1, len(searchResult.Hazards), "number of hazards returned")
+		hazard := searchResult.Hazards[0]
+		assert.Equal(test, hazardID, hazard.ID)
+		assert.Equal(test, hazards.MatchedByRoad, hazard.MatchedBy)
+		// 100 meters to the corner plus 290 after it, not the straight line
+		// (about 307 meters).
+		assert.InDelta(test, 390, hazard.DistanceMeters, 1)
+	})
+
+	// The same hazard without a path: the circle looks straight ahead and
+	// misses it. This is the limitation the paths remove.
+	test.Run("without an approach path the hazard is not found", func(test *testing.T) {
+		transaction := testdatabase.NewTransaction(test)
+		seedDevice(test, transaction, jetsonDeviceID, devices.DeviceTypeJetsonUnit)
+		road := buildRoadWithACorner(test, transaction)
+		seedPotholeAt(test, transaction, road.hazardPosition)
+
+		searchResult, err := hazards.FindNearby(transaction, searchTestPollingRules, vehicleSearchQuery(60))
+
+		require.NoError(test, err)
+		assert.Empty(test, searchResult.Hazards)
+	})
+}
+
+// straightPath is a path that starts at a position and runs in a straight
+// line in a compass direction, with a point every 100 meters. Its last point
+// is where the hazard goes.
+func straightPath(test *testing.T, transaction *sql.Tx, start hazards.Position, directionDegrees float64, lengthMeters float64) []hazards.Position {
+	test.Helper()
+	path := []hazards.Position{start}
+	for distanceMeters := 100.0; distanceMeters <= lengthMeters; distanceMeters += 100 {
+		path = append(path, positionFrom(test, transaction, start, distanceMeters, directionDegrees))
+	}
+	return path
+}
+
+// The limits of the road-following search (docs/design.md section 5). In
+// every case the hazard is placed where the straight-ahead circle can't reach
+// it, so the path alone decides whether it is returned.
+func TestFindNearbyMatchesAPathOnlyWhenTheVehicleIsOnIt(test *testing.T) {
+	vehiclePosition := hazards.Position{Latitude: vehicleLatitude, Longitude: vehicleLongitude}
+	const rightOfVehicleDegrees = 230.0
+	const leftOfVehicleDegrees = 50.0
+
+	// The vehicle's own road: from 100 meters behind it, straight on to a
+	// hazard 900 meters ahead. moveSidewaysMeters shifts the whole road to
+	// the right, to test how close a path has to be.
+	ownRoad := func(moveSidewaysMeters float64) func(*testing.T, *sql.Tx) []hazards.Position {
+		return func(test *testing.T, transaction *sql.Tx) []hazards.Position {
+			onRoad := positionFrom(test, transaction, vehiclePosition, moveSidewaysMeters, rightOfVehicleDegrees)
+			start := positionFrom(test, transaction, onRoad, 100, behindVehicleDegrees)
+			return straightPath(test, transaction, start, vehicleHeadingDegrees, 1000)
+		}
+	}
+
+	testCases := []struct {
+		name                  string
+		buildPath             func(*testing.T, *sql.Tx) []hazards.Position
+		vehicleHeadingDegrees float64
+		hazardExpired         bool
+		// expectedDistanceMeters is the distance by road; 0 means the hazard
+		// must not be returned.
+		expectedDistanceMeters float64
+	}{
+		// There is no limit on how far along a path a hazard may be (user's
+		// call): someone drove from here to that hazard, so it is on this road.
+		// The circle's reach at this speed is only 400 meters.
+		{name: "a hazard 900 meters ahead by road", buildPath: ownRoad(0), vehicleHeadingDegrees: 140, expectedDistanceMeters: 900},
+
+		// How close the path must pass: at most 20 meters.
+		{name: "the path passes 15 meters from the vehicle", buildPath: ownRoad(15), vehicleHeadingDegrees: 140, expectedDistanceMeters: 900},
+		{name: "the path passes 25 meters from the vehicle", buildPath: ownRoad(25), vehicleHeadingDegrees: 140},
+
+		// How far the vehicle's heading may be from the road's direction (140
+		// degrees): at most 60.
+		{name: "the vehicle's heading is 55 degrees off the road", buildPath: ownRoad(0), vehicleHeadingDegrees: 195, expectedDistanceMeters: 900},
+		{name: "the vehicle's heading is 65 degrees off the road", buildPath: ownRoad(0), vehicleHeadingDegrees: 205},
+
+		// The opposite carriageway: a path through the vehicle's position that
+		// runs the other way, to a hazard 300 meters behind the vehicle.
+		{
+			name: "a path running the opposite way",
+			buildPath: func(test *testing.T, transaction *sql.Tx) []hazards.Position {
+				start := positionFrom(test, transaction, vehiclePosition, 100, vehicleHeadingDegrees)
+				return straightPath(test, transaction, start, behindVehicleDegrees, 400)
+			},
+			vehicleHeadingDegrees: 140,
+		},
+
+		// A crossing road: a path through the vehicle's position from left to
+		// right, to a hazard 300 meters to the right.
+		{
+			name: "a path crossing the vehicle's road",
+			buildPath: func(test *testing.T, transaction *sql.Tx) []hazards.Position {
+				start := positionFrom(test, transaction, vehiclePosition, 100, leftOfVehicleDegrees)
+				return straightPath(test, transaction, start, rightOfVehicleDegrees, 400)
+			},
+			vehicleHeadingDegrees: 140,
+		},
+
+		{name: "an expired hazard on the vehicle's road", buildPath: ownRoad(0), vehicleHeadingDegrees: 140, hazardExpired: true},
+	}
+
+	for _, testCase := range testCases {
+		test.Run(testCase.name, func(test *testing.T) {
+			transaction := testdatabase.NewTransaction(test)
+			seedDevice(test, transaction, jetsonDeviceID, devices.DeviceTypeJetsonUnit)
+			path := testCase.buildPath(test, transaction)
+			hazardID := seedPotholeAt(test, transaction, path[len(path)-1])
+			seedApproachPath(test, transaction, hazardID, path)
+			if testCase.hazardExpired {
+				_, err := transaction.Exec(`UPDATE hazards SET expires_at = now() - interval '1 second' WHERE id = $1`, hazardID)
+				require.NoError(test, err)
+			}
+			searchQuery := vehicleSearchQuery(60)
+			searchQuery.HeadingDegrees = testCase.vehicleHeadingDegrees
+
+			searchResult, err := hazards.FindNearby(transaction, searchTestPollingRules, searchQuery)
+
+			require.NoError(test, err)
+			if testCase.expectedDistanceMeters == 0 {
+				assert.Empty(test, searchResult.Hazards)
+				return
+			}
+			require.Equal(test, 1, len(searchResult.Hazards), "number of hazards returned")
+			assert.Equal(test, hazards.MatchedByRoad, searchResult.Hazards[0].MatchedBy)
+			assert.InDelta(test, testCase.expectedDistanceMeters, searchResult.Hazards[0].DistanceMeters, 1)
+		})
+	}
+}
+
+// A hazard can have several paths that match the same vehicle. It is returned
+// once, with the shortest distance by road.
+func TestFindNearbyUsesTheShortestOfSeveralMatchingPaths(test *testing.T) {
+	transaction := testdatabase.NewTransaction(test)
+	seedDevice(test, transaction, jetsonDeviceID, devices.DeviceTypeJetsonUnit)
+	vehiclePosition := hazards.Position{Latitude: vehicleLatitude, Longitude: vehicleLongitude}
+	start := positionFrom(test, transaction, vehiclePosition, 100, behindVehicleDegrees)
+
+	// The direct road: 500 meters from the vehicle to the hazard.
+	directPath := straightPath(test, transaction, start, vehicleHeadingDegrees, 600)
+	hazardPosition := directPath[len(directPath)-1]
+	// A detour to the same hazard: 200 meters ahead, 100 to the right, 200
+	// ahead, 100 back to the left, then the last 100 meters. 700 by road.
+	turnOff := positionFrom(test, transaction, vehiclePosition, 200, vehicleHeadingDegrees)
+	sideRoadStart := positionFrom(test, transaction, turnOff, 100, 230)
+	sideRoadEnd := positionFrom(test, transaction, sideRoadStart, 200, vehicleHeadingDegrees)
+	rejoin := positionFrom(test, transaction, sideRoadEnd, 100, 50)
+	detourPath := []hazards.Position{start, turnOff, sideRoadStart, sideRoadEnd, rejoin, hazardPosition}
+
+	hazardID := seedPotholeAt(test, transaction, hazardPosition)
+	seedApproachPath(test, transaction, hazardID, detourPath)
+	seedApproachPath(test, transaction, hazardID, directPath)
+
+	searchResult, err := hazards.FindNearby(transaction, searchTestPollingRules, vehicleSearchQuery(60))
+
+	require.NoError(test, err)
+	require.Equal(test, 1, len(searchResult.Hazards), "number of hazards returned")
+	assert.InDelta(test, 500, searchResult.Hazards[0].DistanceMeters, 1)
+}
+
+// --- tests for how the two searches are joined ---
+
+// Every hazard in an answer says how it was found (docs/design.md section 5),
+// so a device can announce a road match firmly and a straight-ahead match
+// more softly.
+func TestFindNearbyMarksAHazardFoundOnlyStraightAhead(test *testing.T) {
+	transaction := testdatabase.NewTransaction(test)
+	seedDevice(test, transaction, jetsonDeviceID, devices.DeviceTypeJetsonUnit)
+	seedPotholeFromVehicle(test, transaction, 100, vehicleHeadingDegrees)
+
+	searchResult, err := hazards.FindNearby(transaction, searchTestPollingRules, vehicleSearchQuery(60))
+
+	require.NoError(test, err)
+	require.Equal(test, 1, len(searchResult.Hazards), "number of hazards returned")
+	assert.Equal(test, hazards.MatchedByStraightAhead, searchResult.Hazards[0].MatchedBy)
+	assert.InDelta(test, 100, searchResult.Hazards[0].DistanceMeters, 0.5)
+}
+
+// A hazard 300 meters straight ahead is inside the circle, and its path also
+// passes the vehicle. The path makes a detour, so the two searches disagree
+// about the distance. The hazard is returned once, as the road match, with the
+// distance by road.
+func TestFindNearbyReturnsAHazardFoundBothWaysOnceAsARoadMatch(test *testing.T) {
+	transaction := testdatabase.NewTransaction(test)
+	seedDevice(test, transaction, jetsonDeviceID, devices.DeviceTypeJetsonUnit)
+	vehiclePosition := hazards.Position{Latitude: vehicleLatitude, Longitude: vehicleLongitude}
+	hazardPosition := positionFrom(test, transaction, vehiclePosition, 300, vehicleHeadingDegrees)
+	// 100 meters ahead, 80 to the right, 100 ahead, 80 back to the left, and
+	// the last 100 meters: 460 by road.
+	turnOff := positionFrom(test, transaction, vehiclePosition, 100, vehicleHeadingDegrees)
+	sideRoadStart := positionFrom(test, transaction, turnOff, 80, 230)
+	sideRoadEnd := positionFrom(test, transaction, sideRoadStart, 100, vehicleHeadingDegrees)
+	rejoin := positionFrom(test, transaction, sideRoadEnd, 80, 50)
+	hazardID := seedPotholeAt(test, transaction, hazardPosition)
+	seedApproachPath(test, transaction, hazardID, []hazards.Position{
+		positionFrom(test, transaction, vehiclePosition, 100, behindVehicleDegrees),
+		turnOff, sideRoadStart, sideRoadEnd, rejoin, hazardPosition,
+	})
+
+	searchResult, err := hazards.FindNearby(transaction, searchTestPollingRules, vehicleSearchQuery(60))
+
+	require.NoError(test, err)
+	require.Equal(test, 1, len(searchResult.Hazards), "number of hazards returned")
+	assert.Equal(test, hazards.MatchedByRoad, searchResult.Hazards[0].MatchedBy)
+	assert.InDelta(test, 460, searchResult.Hazards[0].DistanceMeters, 1)
+}
+
+// The user's call (design section 5): a hazard that has paths, none of them
+// matching this vehicle, is still returned by the circle. Here the hazard's
+// only path belongs to a crossing road. Leaving the hazard out would miss a
+// vehicle arriving by a road nobody has recorded yet.
+func TestFindNearbyStillReturnsAHazardWhosePathsDoNotMatch(test *testing.T) {
+	transaction := testdatabase.NewTransaction(test)
+	seedDevice(test, transaction, jetsonDeviceID, devices.DeviceTypeJetsonUnit)
+	vehiclePosition := hazards.Position{Latitude: vehicleLatitude, Longitude: vehicleLongitude}
+	hazardPosition := positionFrom(test, transaction, vehiclePosition, 100, vehicleHeadingDegrees)
+	hazardID := seedPotholeAt(test, transaction, hazardPosition)
+	// A path that reaches the hazard from the left, at a right angle to the
+	// vehicle's road.
+	crossingRoadStart := positionFrom(test, transaction, hazardPosition, 300, 50)
+	seedApproachPath(test, transaction, hazardID, straightPath(test, transaction, crossingRoadStart, 230, 300))
+
+	searchResult, err := hazards.FindNearby(transaction, searchTestPollingRules, vehicleSearchQuery(60))
+
+	require.NoError(test, err)
+	require.Equal(test, 1, len(searchResult.Hazards), "number of hazards returned")
+	assert.Equal(test, hazards.MatchedByStraightAhead, searchResult.Hazards[0].MatchedBy)
+	assert.InDelta(test, 100, searchResult.Hazards[0].DistanceMeters, 0.5)
+}
+
+// seedRoadHazardAhead places a pothole on the vehicle's own straight road, the
+// given distance ahead, with a path from 100 meters behind the vehicle to it.
+func seedRoadHazardAhead(test *testing.T, transaction *sql.Tx, distanceAheadMeters float64) int64 {
+	test.Helper()
+	vehiclePosition := hazards.Position{Latitude: vehicleLatitude, Longitude: vehicleLongitude}
+	hazardPosition := positionFrom(test, transaction, vehiclePosition, distanceAheadMeters, vehicleHeadingDegrees)
+	hazardID := seedPotholeAt(test, transaction, hazardPosition)
+	seedApproachPath(test, transaction, hazardID, []hazards.Position{
+		positionFrom(test, transaction, vehiclePosition, 100, behindVehicleDegrees),
+		hazardPosition,
+	})
+	return hazardID
+}
+
+// Nearest first holds across both searches: a road match is not listed before
+// a nearer straight-ahead match just because it is a road match.
+func TestFindNearbyOrdersTheJoinedResultNearestFirst(test *testing.T) {
+	transaction := testdatabase.NewTransaction(test)
+	seedDevice(test, transaction, jetsonDeviceID, devices.DeviceTypeJetsonUnit)
+	// 600 meters is beyond the circle, so only its path finds this one.
+	roadHazardAt600MetersID := seedRoadHazardAhead(test, transaction, 600)
+	straightAheadHazardAt350MetersID := seedPotholeFromVehicle(test, transaction, 350, vehicleHeadingDegrees)
+	roadHazardAt250MetersID := seedRoadHazardAhead(test, transaction, 250)
+	straightAheadHazardAt100MetersID := seedPotholeFromVehicle(test, transaction, 100, vehicleHeadingDegrees)
+
+	searchResult, err := hazards.FindNearby(transaction, searchTestPollingRules, vehicleSearchQuery(60))
+
+	require.NoError(test, err)
+	var actualHazardIDs []int64
+	for _, hazard := range searchResult.Hazards {
+		actualHazardIDs = append(actualHazardIDs, hazard.ID)
+	}
+	assert.Equal(test, []int64{
+		straightAheadHazardAt100MetersID, roadHazardAt250MetersID,
+		straightAheadHazardAt350MetersID, roadHazardAt600MetersID,
+	}, actualHazardIDs)
+}
+
+// The limit of 100 is for the whole answer, not for each search.
+func TestFindNearbyLimitsTheJoinedResultToOneHundred(test *testing.T) {
+	transaction := testdatabase.NewTransaction(test)
+	seedDevice(test, transaction, jetsonDeviceID, devices.DeviceTypeJetsonUnit)
+	// 70 hazards the circle finds, 5 to 350 meters ahead.
+	for distanceMeters := 5.0; distanceMeters <= 350; distanceMeters += 5 {
+		seedPotholeFromVehicle(test, transaction, distanceMeters, vehicleHeadingDegrees)
+	}
+	// 40 hazards only their paths find, 410 to 800 meters ahead.
+	for distanceMeters := 410.0; distanceMeters <= 800; distanceMeters += 10 {
+		seedRoadHazardAhead(test, transaction, distanceMeters)
+	}
+
+	searchResult, err := hazards.FindNearby(transaction, searchTestPollingRules, vehicleSearchQuery(60))
+
+	require.NoError(test, err)
+	require.Equal(test, 100, len(searchResult.Hazards), "number of hazards returned")
+	// All 70 from the circle and the nearest 30 by road: the last is at 700 meters.
+	farthestHazardReturned := searchResult.Hazards[99]
+	assert.Equal(test, hazards.MatchedByRoad, farthestHazardReturned.MatchedBy)
+	assert.InDelta(test, 700, farthestHazardReturned.DistanceMeters, 1)
+}
+
+// Following a road needs the vehicle's heading, which isn't trusted below 5
+// kilometers per hour. A slow vehicle gets only the circle around itself.
+func TestFindNearbyDoesNotFollowTheRoadForASlowVehicle(test *testing.T) {
+	transaction := testdatabase.NewTransaction(test)
+	seedDevice(test, transaction, jetsonDeviceID, devices.DeviceTypeJetsonUnit)
+	seedRoadHazardAhead(test, transaction, 600)
+	hazardBehindID := seedPotholeFromVehicle(test, transaction, 100, behindVehicleDegrees)
+
+	searchResult, err := hazards.FindNearby(transaction, searchTestPollingRules, vehicleSearchQuery(0))
+
+	require.NoError(test, err)
+	require.Equal(test, 1, len(searchResult.Hazards), "number of hazards returned")
+	assert.Equal(test, hazardBehindID, searchResult.Hazards[0].ID)
+	assert.Equal(test, hazards.MatchedByStraightAhead, searchResult.Hazards[0].MatchedBy)
+}
