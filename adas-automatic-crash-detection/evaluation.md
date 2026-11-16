@@ -106,4 +106,4 @@ Caveat: the commercial fleet in the paper drives more aggressively than a privat
 
 ## 4. Compute cost
 
-`engine_update` on this laptop (gcc -O2, x86-64): **53 ns/sample** over 2,000,000 synthetic samples, including the Python→C batch call. At 100 Hz the budget is 10,000,000 ns/sample; even if the ESP32 (240 MHz Xtensa LX6, single-precision FPU) were 300× slower it would use 0.2% of it.
+`engine_update` on this laptop (gcc -O2, x86-64): **52 ns/sample** over 2,000,000 synthetic samples, including the Python→C batch call. At 100 Hz the budget is 10,000,000 ns/sample; even if the ESP32 (240 MHz Xtensa LX6, single-precision FPU) were 300× slower it would use 0.2% of it.
