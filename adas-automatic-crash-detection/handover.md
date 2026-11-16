@@ -1,8 +1,80 @@
 # Handover — Feature 3: Automatic Crash Detection
 
-This document hands Feature 3 over to the next engineer. It says where the
-work stands, what was learned, what is known to be wrong or unfinished, and
-what to do next. Setup and commands are in [`README.md`](README.md).
+This document hands Feature 3 over to the next engineer. Setup and commands
+are in [`README.md`](README.md).
+
+## v2 (16 Nov 2026) — where things stand now
+
+Everything below the line is the **v1 handover** from the first engineer and
+is kept because its findings still hold (the literature G thresholds don't
+work on car IMUs; ~10–20 % of labelled crashes look like hard braking; speed
+is a confirmation, not a gate). v2 built on it:
+
+| | v1 | v2 |
+|---|---|---|
+| Design | three separate primitives, no decision rule | one engine (`src/engine.c`): plausibility clamp → gravity tracker → crash branch (physics override + fitted score) → rollover → pothole/speed-bump → alarm state machine. [`algorithm.md`](algorithm.md) |
+| Crash rule | peak ‖A‖ threshold ≈ 3 G | sustained-horizontal ≥ 2.5 g override (tyre friction limit argument) **or** a logistic score over 8 window features fitted on the VZCrash *train* split |
+| Potholes | not in scope | recognised from the vertical drop-then-impact signature, reported to the Jetson as a `pothole` hazard, never an alarm |
+| Benchmark | event-level recall/FPR on VZCrash test | same, by severity tier, **plus** false alarms per hour on 3.0 h of real driving (PVS) and a conversion of the VZCrash FPR to per-hour using the paper's fleet rate. [`evaluation.md`](evaluation.md) |
+| Firmware | none | `firmware/retroadas_crash/` — MPU-6050 register driver, 100 Hz, buzzer, cancel button, UART protocol, 3 s raw log, `$SIM` bench mode. **Not yet run on a board.** |
+| Jetson side | none | `jetson/crash_link.py` + [`protocol.md`](protocol.md); demonstrated on the laptop with `eval/replay.py` |
+| Sample rate | 52 Hz | **100 Hz** (every calibration dataset is 100 Hz; MPU-6050 does it trivially) |
+
+Reading order for v2 (about an hour): this section → `algorithm.md` →
+`evaluation.md` → `src/engine.h` → `protocol.md` → `git log --oneline -- .`.
+
+### Results at a glance (16 Nov 2026, full numbers in `evaluation.md`)
+
+| what | result |
+|---|---|
+| Severe crashes (VZCrash test, n = 2,555) | **100.0 %** detected — guaranteed by the two physics overrides |
+| Moderate crashes (3–4 g peak, n = 769) | 79.3 % |
+| Minor crashes (1.8–3 g, n = 817) | 31.8 % — these overlap hard braking on any body-mounted IMU |
+| All labelled crashes (n = 4,221) | 81.1 % |
+| False alarms on 3.0 h of real driving, three cars, asphalt/cobblestone/dirt (PVS) | **0** (rule of three: < 1 per hour at 95 % confidence) |
+| False alarms on 1.7 h of phone data on rough urban roads (RoadSens-4M) | 0 |
+| False-positive rate on VZCrash's *harsh-event* negatives | 2.5 % → ≈ 1 false alarm per 100–300 driving hours using the paper's fleet rate |
+| Road branch sees labelled speed bumps (PVS) | 82 %, none misreported as potholes |
+| Compute | 52 ns/sample on a laptop; < 0.2 % of the 100 Hz budget even at 300× slower |
+
+The whole recall/false-alarm trade-off is one threshold (`CRASH_MODEL_THRESHOLD`);
+`evaluation.md` has the sweep table so the operating point can be moved
+with the team's agreement (e.g. threshold 1.0 → 95 % moderate recall at
+3.7 % harsh-event FPR).
+
+### Decisions taken in v2 (with the team member who owns Feature 3)
+
+- Hardware: ESP32 DevKit + MPU-6050 at ±16 g / ±2000 °/s, 100 Hz, DLPF 44 Hz.
+- Accuracy target is **tiered**: 100 % on severe crashes (guaranteed by the
+  override, which never fired in 4.7 h of real-road data — max sustained
+  horizontal seen was 1.45 g), reported honestly for moderate and minor,
+  ≤ 1 false alarm per driving hour. "Zero false negatives on every labelled
+  crash" is not achievable with a body-mounted IMU and nobody claims it
+  (Apple, Verizon's own models); the write-up says why.
+- Potholes: report, don't alarm. Speed bumps: recognise, don't report.
+- GPS speed comes from the Jetson over UART (`$SPD`), is attached to events,
+  and is never a detection gate.
+
+### What is still open
+
+1. **Run the firmware on the real board.** Expect to touch only
+   `retroadas_crash.ino` (pins, I2C address if AD0 is high). Verify the
+   100 Hz rate with the `$HB` `n_samples` counter (should grow by ~100/s).
+2. **Own-car calibration drive** ([`own_data.md`](own_data.md)): the only
+   event-level pothole ground truth we can get; also re-checks the crash
+   false-alarm rate on Pakistani roads with the real mount.
+3. **Jetson → adas-cloud**: `crash_link.py` posts to `/v1/hazards` with a
+   device id + API key once those exist; until then it logs what it would post.
+4. **Mounting**: the unit must be rigid (double-sided tape to the dash is
+   fine; a loose box is not). The RoadSens phone data shows what a loose
+   mount does: peak rotation rates > 100 °/s on ordinary bumps.
+5. If the fitted score is ever refitted, keep `fit_model.py`'s rule: fit on
+   train, pick the threshold on the held-out fold, report on test. Never tune
+   on the test split.
+
+---
+
+## v1 handover (original, kept for the findings)
 
 Suggested reading order (about an hour):
 

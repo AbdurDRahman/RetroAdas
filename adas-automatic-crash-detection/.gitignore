@@ -3,6 +3,7 @@ data/
 __pycache__/
 *.pyc
 build/
+crash_link.log
 
 # Claude Code assistant files — kept local, not shared
 CLAUDE.md
