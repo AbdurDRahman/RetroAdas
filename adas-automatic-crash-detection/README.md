@@ -7,9 +7,12 @@ the Jetson, so it keeps working during Sentry Mode or while the Jetson
 reboots. The Jetson receives events over UART, attaches GPS and talks to
 `adas-cloud`.
 
-> New here? Read [`handover.md`](handover.md) (state of the work), then
-> [`algorithm.md`](algorithm.md) (the design) and [`evaluation.md`](evaluation.md)
-> (the numbers).
+> New here? Read [`explainer.md`](explainer.md) (everything from zero), then
+> [`rationale.md`](rationale.md) (datasets, design decisions, industry and v1
+> comparison, how to demo it). Reference: [`handover.md`](handover.md) (state
+> of the work), [`algorithm.md`](algorithm.md) (the design),
+> [`evaluation.md`](evaluation.md) and [`comparison.md`](comparison.md) (the
+> numbers, both generated).
 
 ## Status (Nov 2026)
 
@@ -38,6 +41,7 @@ eval/datasets.py          loaders: VZCrash parquet, PVS csv, RoadSens-4M csv
 eval/run_eval.py          the benchmark → evaluation.md
 eval/fit_model.py         fits crash_model.h on VZCrash train (+ real-road negatives)
 eval/sweep_road.py        threshold sweep for the pothole branch
+eval/compare_v1.py        v1 rules vs this engine on identical data → comparison.md
 eval/replay.py            real-time replay / ESP32 emulation / $SIM streaming to a real board
 eval/own_recording.py     run the engine over your own Sensor Logger phone recording
 eval/download_vzcrash.*   dataset download (needs a Hugging Face login)
