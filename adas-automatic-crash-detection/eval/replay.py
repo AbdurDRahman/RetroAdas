@@ -42,6 +42,8 @@ def pick_clip(args):
         for shard, eid, lab, acc, gyr, spd, vs in ds.iter_vzcrash("test"):
             if lab != want:
                 continue
+            if args.min_peak and np.linalg.norm(acc, axis=1).max() < args.min_peak:
+                continue
             if k == args.n:
                 return f"VZCrash {eid} ({args.label})", acc, gyr, spd
             k += 1
@@ -64,6 +66,9 @@ def main():
     ap.add_argument("source", choices=["vzcrash", "pvs", "roadsens"])
     ap.add_argument("--label", default="crash", choices=["crash", "near_miss", "normal"])
     ap.add_argument("--n", type=int, default=0, help="which event of that label")
+    ap.add_argument("--min-peak", type=float, default=0.0,
+                    help="only consider VZCrash events whose peak |a| is at least this (g); "
+                         "4 = severe crashes, which the engine must always catch")
     ap.add_argument("--drive", type=int, default=1)
     ap.add_argument("--file", type=int, default=1)
     ap.add_argument("--start", type=float, default=0.0)
@@ -80,7 +85,16 @@ def main():
 
     sock = ser = None
     if args.tcp:
-        sock = socket.create_connection(("127.0.0.1", args.tcp))
+        # the Jetson side may be starting at the same moment (VS Code demo task): retry for 20 s
+        deadline = time.time() + 20.0
+        while True:
+            try:
+                sock = socket.create_connection(("127.0.0.1", args.tcp), timeout=2.0)
+                break
+            except OSError:
+                if time.time() > deadline:
+                    raise SystemExit(f"nothing listening on port {args.tcp} — start jetson/crash_link.py --tcp {args.tcp} first")
+                time.sleep(0.5)
         sock.setblocking(False)
         print(f"connected to crash_link on {args.tcp}")
 

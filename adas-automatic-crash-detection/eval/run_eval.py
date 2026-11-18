@@ -389,6 +389,7 @@ def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument("--skip", nargs="*", default=[], choices=["pvs", "roadsens", "vzcrash", "timing"])
     ap.add_argument("--quick", action="store_true", help="VZCrash: 3000 events per shard")
+    ap.add_argument("--print", action="store_true", help="also print evaluation.md to the terminal")
     args = ap.parse_args(argv)
     res = {}
     e = Engine()
@@ -412,6 +413,10 @@ def main(argv):
     OUT_MD.write_text("\n".join(sections), encoding="utf-8")
     OUT_JSON.parent.mkdir(exist_ok=True)
     OUT_JSON.write_text(json.dumps(res, indent=1, default=str), encoding="utf-8")
+    if args.print:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        print("\n".join(sections))
+        print()
     print(f"wrote {OUT_MD}")
 
 

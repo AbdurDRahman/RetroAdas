@@ -47,7 +47,7 @@ PVS labels *stretches* of road (surface, roughness, speed bump), not individual 
 
 ## 3. VZCrash — crash recall by severity tier
 
-24174 test-split events in 4 s (crash 4221, near_miss 3633, normal_driving 16320).
+24174 test-split events in 11 s (crash 4221, near_miss 3633, normal_driving 16320).
 
 Every VZCrash event — including `normal_driving` — was pre-selected by the telematics unit's harsh-driving trigger (paper, Sec. II), so the negatives are the hardest 'what could fool us' population, not ordinary driving. Ordinary driving is section 1.
 
@@ -106,4 +106,4 @@ Caveat: the commercial fleet in the paper drives more aggressively than a privat
 
 ## 4. Compute cost
 
-`engine_update` on this laptop (gcc -O2, x86-64): **52 ns/sample** over 2,000,000 synthetic samples, including the Python→C batch call. At 100 Hz the budget is 10,000,000 ns/sample; even if the ESP32 (240 MHz Xtensa LX6, single-precision FPU) were 300× slower it would use 0.2% of it.
+`engine_update` on this laptop (gcc -O2, x86-64): **131 ns/sample** over 2,000,000 synthetic samples, including the Python→C batch call. At 100 Hz the budget is 10,000,000 ns/sample; even if the ESP32 (240 MHz Xtensa LX6, single-precision FPU) were 300× slower it would use 0.4% of it.

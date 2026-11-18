@@ -326,6 +326,10 @@ def main():
     OUT_JSON.parent.mkdir(exist_ok=True)
     OUT_JSON.write_text(json.dumps({"rows": table, "v2_fpr": v2_fpr,
                                     "z_consts": zc}, indent=1), encoding="utf-8")
+    if "--print" in sys.argv[1:]:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        print("\n".join(lines))
+        print()
     print(f"wrote {OUT_MD}")
 
 

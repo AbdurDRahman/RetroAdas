@@ -84,10 +84,10 @@ gcc -std=c99 -Wall -Wextra -c src/engine.c -o NUL
 
 # laptop demo of the whole chain: terminal 1 is the Jetson, terminal 2 is the ESP32
 .venv\Scripts\python jetson\crash_link.py --tcp 9000 --gps-fake 40
-.venv\Scripts\python eval\replay.py vzcrash --label crash --n 0 --tcp 9000 --countdown 5
+.venv\Scripts\python eval\replay.py vzcrash --label crash --n 0 --min-peak 4 --tcp 9000 --countdown 5
 
 # stream a real crash recording into a real ESP32 on COM5 (its buzzer goes off)
-.venv\Scripts\python eval\replay.py vzcrash --label crash --n 0 --port COM5
+.venv\Scripts\python eval\replay.py vzcrash --label crash --n 0 --min-peak 4 --port COM5
 ```
 
 `evaluation.md` is reproducible: on the same data the accuracy numbers come

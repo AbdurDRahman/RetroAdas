@@ -500,7 +500,23 @@ benchmarking approach. v2 builds on v1's work rather than replacing it.
 
 ## 6. Running it for your supervisor
 
-### 6.1 One-time: open a terminal in the right folder
+### 6.0 Easiest: from VS Code
+
+Open the `adas-automatic-crash-detection` folder in VS Code
+(File → Open Folder). Then:
+
+- **Ctrl+Shift+B** runs everything in sections 6.2–6.4 one after
+  another. The output, including the full result tables, appears in
+  VS Code's terminal panel at the bottom.
+- **Ctrl+Shift+P → "Tasks: Run Task"** lists each step on its own, plus
+  the two live demos: *"Demo: crash end-to-end"* and *"Demo: emergency
+  stop end-to-end"*. Each demo opens two terminals side by side, one for
+  the Jetson and one for the ESP32.
+
+The task definitions are in `.vscode/tasks.json`. The rest of this
+section is the same steps typed by hand.
+
+### 6.1 By hand: open a terminal in the right folder
 
 1. Open **File Explorer** and go to
    `C:\Users\dell\Documents\RetroADAS Directory\RetroAdas\adas-automatic-crash-detection`.
@@ -574,7 +590,7 @@ Window 2 plays the **ESP32**, replaying a **real recorded crash** from
 VZCrash in real time:
 
 ```
-.venv\Scripts\python eval\replay.py vzcrash --label crash --n 0 --tcp 9000 --countdown 5
+.venv\Scripts\python eval\replay.py vzcrash --label crash --n 0 --min-peak 4 --tcp 9000 --countdown 5
 ```
 
 **What you'll see:** window 2 prints `CRASH` at the moment of impact.

@@ -433,7 +433,7 @@ Live demo, two terminals. Terminal 1 is the Jetson:
 Terminal 2 is the ESP32 replaying a **real recorded crash** in real time:
 
 ```
-.venv\Scripts\python eval\replay.py vzcrash --label crash --n 0 --tcp 9000 --countdown 5
+.venv\Scripts\python eval\replay.py vzcrash --label crash --n 0 --min-peak 4 --tcp 9000 --countdown 5
 ```
 
 You see: crash detected → acknowledged → countdown → confirmed → "accident"
