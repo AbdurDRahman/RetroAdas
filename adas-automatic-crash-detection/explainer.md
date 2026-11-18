@@ -135,9 +135,10 @@ sent to the Jetson, which adds the GPS position and reports it. Then a
 60-second lockout so one crash produces exactly one report.
 
 Everything above is a few dozen multiplications per reading. Measured:
-**52 nanoseconds per reading** on a laptop; the ESP32 has 10,000,000
-nanoseconds between readings, so even if it were 300 times slower than a
-laptop it would use 0.2 % of its time.
+**about 50–150 nanoseconds per reading** on a laptop (it varies with
+how busy the laptop is). The ESP32 has 10,000,000 nanoseconds between
+readings, so even if it were 300 times slower than a laptop it would use
+under 0.5 % of its time.
 
 ---
 
@@ -287,7 +288,7 @@ misreports none of them as potholes; ~1 pothole report per hour on asphalt
 that PVS labels "ok" (which may well contain real unlabelled potholes — we
 don't know, which is why the own-car drive matters).
 
-**Speed:** 52 ns per reading on a laptop; < 0.2 % of the ESP32's time
+**Speed:** ~50–150 ns per reading on a laptop; < 0.5 % of the ESP32's time
 even at 300× slower.
 
 **Consistency check:** the report recomputes the engine's decisions
@@ -393,7 +394,7 @@ it orientation-independent. The three PVS cars and the Bangladeshi phone
 data are four different mounts; none produced an alarm. A rigid mount is
 still required and documented.
 
-**"Will it run in real time on the ESP32?"** 52 ns/sample on a PC vs a
+**"Will it run in real time on the ESP32?"** ~50–150 ns/sample on a PC vs a
 10 ms budget; plain C99, no dynamic memory, single-precision float only
 (the ESP32 FPU is single precision). The benchmark runs the *same compiled
 code* as the firmware.

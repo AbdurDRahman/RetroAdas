@@ -311,7 +311,7 @@ All are measured on data that was not used to choose them:
 | False alarms, 3.0 h real driving in three cars (PVS) | **0** | ≤ 1 per hour |
 | False alarms, 1.7 h rough roads with a loose phone (RoadSens) | 0 | — |
 | False-positive rate on harsh events (VZCrash) | 2.5 % ≈ 1 per 100–300 driving hours | ≤ 1 per hour |
-| Compute per reading | 52 ns on a laptop; < 0.2 % of the ESP32 at 300× slower | fits easily |
+| Compute per reading | ~50–150 ns on a laptop (varies with load); < 0.5 % of the ESP32 at 300× slower | fits easily |
 
 ### 3.2 Why "not 100 % of all crashes" is the correct answer
 
@@ -563,7 +563,7 @@ viewer) and walk through it:
 | 3 | moderate 79.3 %, minor 31.8 % | the grey zone and the braking look-alikes | Expected; matches industry practice (section 4). |
 | 3 | "False-positive rate … 2.5 %" and the per-hour table: **~107 hours per false alarm** | how often a harsh but harmless event fools it, converted to driving hours | Yes; about 100× better than the target. |
 | 3 | **operating-point sweep table** | how recall and false alarms trade off as the one score threshold moves | Shows the setting was chosen deliberately. E.g. threshold 1.0 → 95 % moderate recall at 3.7 % FPR. |
-| **4. Compute** | **52 ns/sample** | time per reading | Uses < 0.2 % of the ESP32 even at 300× slower. |
+| **4. Compute** | **~50–150 ns/sample** (changes run to run with laptop load) | time per reading | Uses < 0.5 % of the ESP32 even at 300× slower. |
 
 ### 6.4 Step 3 — the v1 vs v2 comparison (about 1–2 minutes)
 

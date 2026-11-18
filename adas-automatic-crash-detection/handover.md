@@ -35,7 +35,7 @@ Reading order for v2 (about an hour): this section → `algorithm.md` →
 | False alarms on 1.7 h of phone data on rough urban roads (RoadSens-4M) | 0 |
 | False-positive rate on VZCrash's *harsh-event* negatives | 2.5 % → ≈ 1 false alarm per 100–300 driving hours using the paper's fleet rate |
 | Road branch sees labelled speed bumps (PVS) | 82 %, none misreported as potholes |
-| Compute | 52 ns/sample on a laptop; < 0.2 % of the 100 Hz budget even at 300× slower |
+| Compute | ~50–150 ns/sample on a laptop (varies with load); < 0.5 % of the 100 Hz budget even at 300× slower |
 
 The whole recall/false-alarm trade-off is one threshold (`CRASH_MODEL_THRESHOLD`);
 `evaluation.md` has the sweep table so the operating point can be moved
