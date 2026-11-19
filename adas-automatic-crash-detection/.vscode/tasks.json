@@ -68,6 +68,28 @@
             "label": "Demo: emergency stop end-to-end (Jetson + ESP32 side by side)",
             "dependsOrder": "parallel",
             "dependsOn": ["Demo: Jetson side", "Demo: ESP32 replays a REAL emergency stop (should NOT fire)"]
+        },
+        {
+            // car_test.md step 5-6: ESP32 plugged in by USB; passenger keys p/b/r/h/x/c, q to stop
+            "label": "Car test: 1. record a drive (ESP32 on USB)",
+            "type": "process",
+            "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+            "args": ["eval\\drive_logger.py", "--name", "${input:driveName}"],
+            "presentation": { "focus": true, "panel": "dedicated", "clear": true }
+        },
+        {
+            "label": "Car test: 2. report on the newest drive",
+            "type": "process",
+            "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+            "args": ["eval\\drive_report.py"]
+        }
+    ],
+    "inputs": [
+        {
+            "id": "driveName",
+            "type": "promptString",
+            "description": "Short name for this drive (e.g. route1, desk)",
+            "default": "drive"
         }
     ]
 }

@@ -21,7 +21,8 @@ reboots. The Jetson receives events over UART, attaches GPS and talks to
 | Detection engine (crash / rollover / pothole / speed bump) | **Done** — `src/engine.c`, C99, ESP32-portable |
 | Laptop benchmark on VZCrash + PVS + RoadSens-4M | **Done** — `eval/run_eval.py` → `evaluation.md` |
 | Fitted crash score (`src/crash_model.h`) | **Done** — `eval/fit_model.py` on the VZCrash train split |
-| ESP32 firmware (MPU-6050 driver, buzzer, cancel button, UART link, event log) | **Written**, not yet run on hardware |
+| ESP32 firmware (MPU-6050 driver, buzzer, cancel button, UART link, event log) | **Written** and compile-checked against stand-in Arduino headers; not yet run on hardware |
+| Car test tooling (raw stream, drive logger, report with map) | **Done** — `car_test.md`; tested end to end against a simulated board |
 | Jetson link script (ack, GPS speed, cloud + emergency stubs) | **Done** — `jetson/crash_link.py`, demonstrated on the laptop |
 | ESP32 ↔ Jetson protocol | **Done** — `protocol.md` |
 | Own-car calibration drive (event-level pothole ground truth) | **Not done** — `own_data.md` says how |
@@ -44,6 +45,8 @@ eval/sweep_road.py        threshold sweep for the pothole branch
 eval/compare_v1.py        v1 rules vs this engine on identical data → comparison.md
 eval/replay.py            real-time replay / ESP32 emulation / $SIM streaming to a real board
 eval/own_recording.py     run the engine over your own Sensor Logger phone recording
+eval/drive_logger.py      car test: records the board's raw stream, detections and passenger marks
+eval/drive_report.py      car test: counts, board-vs-laptop check, locations and map (car_test.md)
 eval/download_vzcrash.*   dataset download (needs a Hugging Face login)
 bench/                    the original Tests 2–4 harness (results.md); kept for history
 ```
@@ -94,6 +97,8 @@ gcc -std=c99 -Wall -Wextra -c src/engine.c -o NUL
 out identical; only the ns/sample timing differs between machines.
 
 ## Flashing the ESP32
+
+Full walkthrough with wiring, desk checks and the car test: [`car_test.md`](car_test.md).
 
 1. `.venv\Scripts\python firmware\sync_src.py`
 2. Arduino IDE 2.x → open `firmware/retroadas_crash/retroadas_crash.ino`, board
