@@ -53,6 +53,7 @@ the local log). Heartbeats are never acknowledged.
 | `$CFG,key,value` | optional | runtime tuning: `alarm_ms`, `pretrig_g`, `score_thr`, `pot_trig_g`, `buzzer` (0/1 mute) — persists until reboot |
 | `$ACK,seq` | reply to `$EVT` / `$ALM` | |
 | `$PING` | any time | ESP32 answers `$HB` immediately |
+| `$RAW,1` / `$RAW,0` | car test only (`eval/drive_logger.py` over USB) | turns the USB-only raw stream on/off: `R,n,ms,ax,ay,az,gx,gy,gz` per sample and `E,n,ms,code` per engine event (speed bumps included). Never sent on the Jetson UART. See `car_test.md` |
 
 ## Behaviour when the Jetson is absent
 

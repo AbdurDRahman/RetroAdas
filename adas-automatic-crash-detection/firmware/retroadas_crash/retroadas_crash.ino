@@ -19,10 +19,18 @@
  * Bench test without a car: send "$SIM,ax,ay,az,gx,gy,gz" lines (g, deg/s)
  * on USB at 100 Hz (eval/replay.py --port COMx does this with real recorded
  * crash clips); while SIM lines arrive the IMU is ignored.
+ *
+ * Car test (laptop in the car, no Jetson): eval/drive_logger.py sends "$RAW,1"
+ * and the board then also prints, on USB only,
+ *   R,n,ms,ax,ay,az,gx,gy,gz   every sample (g, deg/s) — the raw drive
+ *   E,n,ms,code                every engine event, speed bumps included
+ * so the drive can be replayed and checked on the laptop. "$RAW,0" stops it.
+ * This only adds output; the detection itself is unchanged.
  */
 #include <Wire.h>
 #include <HardwareSerial.h>
 #include "engine.h"
+#include "crash_model.h"   /* CRASH_MODEL_VERSION for the start-up line */
 
 /* ---- pins / constants ------------------------------------------------ */
 #define PIN_SDA 21
@@ -62,6 +70,7 @@ static uint32_t last_sim_ms = 0;
 static bool sim_mode = false;
 static imu_sample_t sim_sample;
 static bool sim_pending = false;
+static bool raw_stream = false;       /* car-test mode: R/E lines on USB */
 
 /* raw-sample ring for the post-event log */
 static imu_sample_t logring[LOG_SAMPLES];
@@ -196,7 +205,7 @@ static void ack_received(uint16_t s)
 static void send_heartbeat(void)
 {
     char body[80];
-    snprintf(body, sizeof(body), "HB,%u,%lu,%d,%d,%lu", ++seq, millis() / 1000,
+    snprintf(body, sizeof(body), "HB,%u,%lu,%d,%d,%lu", ++seq, (unsigned long)(millis() / 1000),
              (int)eng.state, eng.fault ? 1 : 0, (unsigned long)eng.n_samples);
     send_line(body, false, seq);
 }
@@ -204,7 +213,7 @@ static void send_heartbeat(void)
 static void send_event(engine_event_t ev)
 {
     char body[110];
-    uint32_t t = millis();
+    unsigned long t = millis();
     switch (ev) {
     case EV_CRASH:
         snprintf(body, sizeof(body), "EVT,%u,CRASH,%lu,%.2f,%.2f,%.2f,%.2f,%d,%.1f", ++seq, t,
@@ -246,6 +255,9 @@ static void send_event(engine_event_t ev)
 static void pump_log_dump(void)
 {
     if (!log_dump_pending) return;
+    /* in car-test mode the raw stream already holds these samples, and the
+     * extra 22 kB on the USB port would stall the 100 Hz loop */
+    if (raw_stream) { log_dump_pending = false; return; }
     for (int k = 0; k < 10 && log_dump_i < LOG_SAMPLES; k++, log_dump_i++) {
         const imu_sample_t *s = &logring[(loghead + log_dump_i) % LOG_SAMPLES];
         char body[110];
@@ -309,6 +321,9 @@ static void handle_line(char *line, bool from_usb)
             sim_mode = true;
             last_sim_ms = millis();
         }
+    } else if (strncmp(body, "RAW,", 4) == 0) {
+        raw_stream = atoi(body + 4) != 0;
+        Serial.printf("# raw stream %s\n", raw_stream ? "on" : "off");
     }
 }
 
@@ -354,7 +369,17 @@ static void process_sample(const imu_sample_t *s)
 {
     logring[loghead] = *s;
     loghead = (uint16_t)((loghead + 1) % LOG_SAMPLES);
-    engine_event_t ev = engine_update(&eng, s, millis());
+    uint32_t t = millis();
+    engine_event_t ev = engine_update(&eng, s, t);
+    if (raw_stream) {
+        /* ~45 bytes x 100 Hz = 4.5 kB/s, well inside 115200 baud (11.5 kB/s) */
+        Serial.printf("R,%lu,%lu,%.3f,%.3f,%.3f,%.1f,%.1f,%.1f\n",
+                      (unsigned long)eng.n_samples, (unsigned long)t,
+                      s->ax, s->ay, s->az, s->gx, s->gy, s->gz);
+        if (ev != EV_NONE) {
+            Serial.printf("E,%lu,%lu,%d\n", (unsigned long)eng.n_samples, (unsigned long)t, (int)ev);
+        }
+    }
     if (ev != EV_NONE && ev != EV_SPEED_BUMP) {
         Serial.printf("# event %d state %d\n", (int)ev, (int)eng.state);
         send_event(ev);
@@ -414,7 +439,8 @@ void loop()
         last_hb_ms = now;
         send_heartbeat();
         if (eng.state == ST_ALARM) {
-            Serial.printf("# ALARM %lu s left\n", (eng.cfg.alarm_ms - (now - eng.state_since_ms)) / 1000);
+            Serial.printf("# ALARM %lu s left\n",
+                          (unsigned long)((eng.cfg.alarm_ms - (now - eng.state_since_ms)) / 1000));
         }
     }
     retry_queue();
